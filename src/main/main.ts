@@ -336,14 +336,20 @@ function resolveSourceProjectLaunch(
   const launchArgs = extractProgramArgs(launchFile) ?? DEFAULT_PROGRAM_ARGS;
   const vmArgsLine = extractVmArgs(launchFile) ?? "";
   const vmArgs = tokenizeArgs(vmArgsLine);
-  const nativeVmArgs = resolveNativeVmArgs(sourceRoot, vmArgs);
+  const sanitizedVmArgs = vmArgs.filter(
+    (arg) =>
+      !/^-D(?:java\.library\.path|org\.lwjgl\.librarypath|net\.java\.games\.input\.librarypath)=/.test(
+        arg
+      )
+  );
+  const nativeVmArgs = resolveNativeVmArgs(sourceRoot);
   const runtimeClasspath = buildRuntimeClasspath(sourceRoot);
   const classpath = runtimeClasspath.length > 0 ? runtimeClasspath : binDir;
 
   return {
     command: javaCommand,
     args: [
-      ...vmArgs,
+      ...sanitizedVmArgs,
       ...nativeVmArgs,
       "-cp",
       classpath,
@@ -522,16 +528,7 @@ function normalizePathForJava(filePath: string): string {
   return filePath.replace(/\\/g, "/");
 }
 
-function resolveNativeVmArgs(sourceRoot: string, existingVmArgs: string[]): string[] {
-  const hasNativePath = existingVmArgs.some((arg) =>
-    /^-D(?:java\.library\.path|org\.lwjgl\.librarypath|net\.java\.games\.input\.librarypath)=/.test(
-      arg
-    )
-  );
-  if (hasNativePath) {
-    return [];
-  }
-
+function resolveNativeVmArgs(sourceRoot: string): string[] {
   const nativesDir = resolveNativesDir(sourceRoot);
   if (!nativesDir) {
     return [];
@@ -550,6 +547,9 @@ function resolveNativesDir(sourceRoot: string): string | null {
   let current = sourceRoot;
   while (true) {
     candidates.push(
+      path.join(current, "libraries", "natives"),
+      path.join(current, "lib", "natives"),
+      path.join(current, "jars", "natives"),
       path.join(current, "bin", "natives"),
       path.join(current, "natives"),
       path.join(current, "game", "bin", "natives"),
