@@ -10,8 +10,25 @@ if (!process.env.CMC_DB_URL) {
 
 const app = express();
 const port = Number(process.env.PORT ?? 8787);
+const allowedOrigins = new Set(
+  (process.env.CORS_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
 
-app.use(cors());
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Origin not allowed by CORS"));
+    },
+  }),
+);
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
