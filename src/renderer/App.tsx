@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { LauncherAppInfo, UpdateEventPayload } from "../shared/ipc";
+import { HostStatus, LauncherAppInfo, UpdateEventPayload } from "../shared/ipc";
 
 type LauncherApi = {
   getAppInfo: () => Promise<LauncherAppInfo>;
@@ -8,6 +8,11 @@ type LauncherApi = {
   downloadMinecraftFromGithub: () => Promise<{ ok: boolean; message: string; path?: string }>;
   launchMinecraft: () => Promise<{ ok: boolean; message: string }>;
   openMinecraftWorlds: () => Promise<{ ok: boolean; message: string }>;
+  getHostStatus: () => Promise<HostStatus>;
+  startHostServer: () => Promise<{ ok: boolean; message: string }>;
+  stopHostServer: () => Promise<{ ok: boolean; message: string }>;
+  startHostTunnel: () => Promise<{ ok: boolean; message: string }>;
+  stopHostTunnel: () => Promise<{ ok: boolean; message: string }>;
   checkForUpdates: () => Promise<void>;
   installUpdate: () => Promise<void>;
   onUpdateEvent: (handler: (payload: UpdateEventPayload) => void) => () => void;
@@ -106,6 +111,7 @@ const changelogEntries = [
 ];
 
 export function App(): JSX.Element {
+  const [activeTab, setActiveTab] = useState<"play" | "host">("play");
   const [appInfo, setAppInfo] = useState<LauncherAppInfo>({
     version: "unknown",
     updateChannel: "latest",
@@ -120,6 +126,16 @@ export function App(): JSX.Element {
   const [downloadingSource, setDownloadingSource] = useState(false);
   const [minecraftExePath, setMinecraftExePath] = useState("");
   const [launchStatus, setLaunchStatus] = useState("");
+  const [hostBusy, setHostBusy] = useState(false);
+  const [hostMessage, setHostMessage] = useState("");
+  const [hostStatus, setHostStatus] = useState<HostStatus>({
+    serverRunning: false,
+    tunnelRunning: false,
+    serverRoot: "",
+    publicAddress: "",
+    serverLogTail: [],
+    tunnelLogTail: []
+  });
 
   useEffect(() => {
     window.launcherApi.getAppInfo().then(setAppInfo).catch(() => {
@@ -135,7 +151,19 @@ export function App(): JSX.Element {
       setEvent(payload);
     });
 
-    return () => unsubscribe();
+    const refreshHost = () => {
+      window.launcherApi
+        .getHostStatus()
+        .then(setHostStatus)
+        .catch(() => undefined);
+    };
+    refreshHost();
+    const timer = window.setInterval(refreshHost, 2000);
+
+    return () => {
+      window.clearInterval(timer);
+      unsubscribe();
+    };
   }, []);
 
   const percentLabel = useMemo(() => {
@@ -184,7 +212,34 @@ export function App(): JSX.Element {
         <strong>{appInfo.updateChannel}</strong>
       </p>
 
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <button
+          className="a-btn"
+          style={{
+            ...buttonStyle,
+            background: activeTab === "play" ? "#4f8cff" : "#313a57",
+            color: "#fff"
+          }}
+          onClick={() => setActiveTab("play")}
+        >
+          Play
+        </button>
+        <button
+          className="a-btn"
+          style={{
+            ...buttonStyle,
+            background: activeTab === "host" ? "#4f8cff" : "#313a57",
+            color: "#fff"
+          }}
+          onClick={() => setActiveTab("host")}
+        >
+          Host
+        </button>
+      </div>
+
       <div style={gridStyle}>
+      {activeTab === "play" ? (
+      <>
       <section
         style={{
           marginTop: 8,
@@ -341,6 +396,134 @@ export function App(): JSX.Element {
         </div>
         {launchStatus ? <p style={{ marginTop: 10, opacity: 0.92 }}>{launchStatus}</p> : null}
       </section>
+      </>
+      ) : (
+      <section
+        style={{
+          marginTop: 8,
+          padding: 14,
+          borderRadius: 12,
+          background: "rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.08)"
+        }}
+      >
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Host Server</h2>
+        <p style={{ marginBottom: 8, opacity: 0.9 }}>
+          Runs local `minecraft_server` source and exposes multiplayer using Playit.
+        </p>
+        <p style={{ margin: "0 0 8px", opacity: 0.86 }}>
+          Server root: <strong>{hostStatus.serverRoot || "not detected"}</strong>
+        </p>
+        <p style={{ margin: "0 0 8px", opacity: 0.86 }}>
+          Tunnel: <strong>{hostStatus.publicAddress || "not connected yet"}</strong>
+        </p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            className="a-btn"
+            style={{ ...buttonStyle, background: "#4edca8", color: "#0d1b18" }}
+            disabled={hostBusy || hostStatus.serverRunning}
+            onClick={async () => {
+              setHostBusy(true);
+              try {
+                const result = await window.launcherApi.startHostServer();
+                setHostMessage(result.message);
+              } finally {
+                setHostBusy(false);
+              }
+            }}
+          >
+            Start Server
+          </button>
+          <button
+            className="a-btn"
+            style={{ ...buttonStyle, background: "#8b8fa8", color: "#fff" }}
+            disabled={hostBusy || !hostStatus.serverRunning}
+            onClick={async () => {
+              setHostBusy(true);
+              try {
+                const result = await window.launcherApi.stopHostServer();
+                setHostMessage(result.message);
+              } finally {
+                setHostBusy(false);
+              }
+            }}
+          >
+            Stop Server
+          </button>
+          <button
+            className="a-btn"
+            style={{ ...buttonStyle, background: "#c9a24d", color: "#1b1300" }}
+            disabled={hostBusy || hostStatus.tunnelRunning}
+            onClick={async () => {
+              setHostBusy(true);
+              try {
+                const result = await window.launcherApi.startHostTunnel();
+                setHostMessage(result.message);
+              } finally {
+                setHostBusy(false);
+              }
+            }}
+          >
+            Start Playit Tunnel
+          </button>
+          <button
+            className="a-btn"
+            style={{ ...buttonStyle, background: "#3c4667", color: "#eef2ff" }}
+            disabled={hostBusy || !hostStatus.tunnelRunning}
+            onClick={async () => {
+              setHostBusy(true);
+              try {
+                const result = await window.launcherApi.stopHostTunnel();
+                setHostMessage(result.message);
+              } finally {
+                setHostBusy(false);
+              }
+            }}
+          >
+            Stop Tunnel
+          </button>
+        </div>
+        {hostMessage ? <p style={{ marginTop: 10, opacity: 0.92 }}>{hostMessage}</p> : null}
+        <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+          <div
+            style={{
+              padding: 10,
+              borderRadius: 10,
+              background: "rgba(0,0,0,0.24)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              maxHeight: 120,
+              overflowY: "auto",
+              fontFamily: "Consolas, monospace",
+              fontSize: 12
+            }}
+          >
+            {(hostStatus.serverLogTail.length > 0 ? hostStatus.serverLogTail : ["[host] No server logs yet."]).map(
+              (line, idx) => (
+                <div key={`${line}-${idx}`}>{line}</div>
+              )
+            )}
+          </div>
+          <div
+            style={{
+              padding: 10,
+              borderRadius: 10,
+              background: "rgba(0,0,0,0.24)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              maxHeight: 120,
+              overflowY: "auto",
+              fontFamily: "Consolas, monospace",
+              fontSize: 12
+            }}
+          >
+            {(hostStatus.tunnelLogTail.length > 0
+              ? hostStatus.tunnelLogTail
+              : ["[playit] No tunnel logs yet."]).map((line, idx) => (
+              <div key={`${line}-${idx}`}>{line}</div>
+            ))}
+          </div>
+        </div>
+      </section>
+      )}
       <section
         style={{
           marginTop: 16,

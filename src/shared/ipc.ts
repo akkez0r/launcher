@@ -5,6 +5,11 @@ export const IPC_CHANNELS = {
   DOWNLOAD_MINECRAFT_FROM_GITHUB: "launcher:download-minecraft-from-github",
   LAUNCH_MINECRAFT: "launcher:launch-minecraft",
   OPEN_MINECRAFT_WORLDS: "launcher:open-minecraft-worlds",
+  HOST_GET_STATUS: "launcher:host-get-status",
+  HOST_START_SERVER: "launcher:host-start-server",
+  HOST_STOP_SERVER: "launcher:host-stop-server",
+  HOST_START_TUNNEL: "launcher:host-start-tunnel",
+  HOST_STOP_TUNNEL: "launcher:host-stop-tunnel",
   CHECK_FOR_UPDATES: "launcher:check-for-updates",
   INSTALL_UPDATE: "launcher:install-update",
   UPDATE_EVENT: "launcher:update-event"
@@ -30,4 +35,13 @@ export interface UpdateEventPayload {
   message?: string;
   percent?: number;
   bytesPerSecond?: number;
+}
+
+export interface HostStatus {
+  serverRunning: boolean;
+  tunnelRunning: boolean;
+  serverRoot: string;
+  publicAddress: string;
+  serverLogTail: string[];
+  tunnelLogTail: string[];
 }

@@ -16,12 +16,18 @@ import {
   writeFileSync,
   createWriteStream
 } from "node:fs";
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import {
+  spawn,
+  spawnSync,
+  type ChildProcess,
+  type ChildProcessWithoutNullStreams
+} from "node:child_process";
 import https from "node:https";
 import http, { type IncomingMessage } from "node:http";
 import { pipeline } from "node:stream/promises";
 import AdmZip from "adm-zip";
 import {
+  HostStatus,
   IPC_CHANNELS,
   LauncherAppInfo,
   UpdateEventPayload
@@ -46,6 +52,8 @@ const DEFAULT_PROGRAM_ARGS =
   "--username Player --uuid - --session - --version 1.5.2 --gameDir . --assetsDir .\\assets --assetIndex 1.4 --accessToken - --userProperties {} --userType legacy --versionType snapshot --skinProxy pre-1.8";
 const LOCKED_MINECRAFT_SOURCE_ZIP_URL =
   "https://github.com/akkez0r/launcher/releases/latest/download/minecraft-source.zip";
+const PLAYIT_DOWNLOAD_URL =
+  "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe";
 
 type LaunchConfig = {
   command: string;
@@ -57,6 +65,12 @@ type SourcePrepResult = {
   ok: boolean;
   message: string;
 };
+
+let hostServerProcess: ChildProcessWithoutNullStreams | null = null;
+let hostTunnelProcess: ChildProcessWithoutNullStreams | null = null;
+let hostPublicAddress = "";
+const hostServerLog: string[] = [];
+const hostTunnelLog: string[] = [];
 
 function sendUpdateEvent(payload: UpdateEventPayload): void {
   mainWindow?.webContents.send(IPC_CHANNELS.UPDATE_EVENT, payload);
@@ -185,6 +199,26 @@ function wireIpc(): void {
       return { ok: false, message: `Failed to open worlds folder: ${openResult}` };
     }
     return { ok: true, message: `Opened worlds folder: ${worldsDir}` };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.HOST_GET_STATUS, () => {
+    return getHostStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.HOST_START_SERVER, async () => {
+    return startHostServer();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.HOST_STOP_SERVER, async () => {
+    return stopHostServer();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.HOST_START_TUNNEL, async () => {
+    return startHostTunnel();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.HOST_STOP_TUNNEL, async () => {
+    return stopHostTunnel();
   });
 
   ipcMain.handle(IPC_CHANNELS.LAUNCH_MINECRAFT, async () => {
@@ -914,6 +948,234 @@ function findProjectRoot(extractDir: string): string | null {
   }
 
   return null;
+}
+
+function getHostStatus(): HostStatus {
+  return {
+    serverRunning: hostServerProcess !== null,
+    tunnelRunning: hostTunnelProcess !== null,
+    serverRoot: resolveServerSourceRoot() ?? "",
+    publicAddress: hostPublicAddress,
+    serverLogTail: hostServerLog.slice(-30),
+    tunnelLogTail: hostTunnelLog.slice(-30)
+  };
+}
+
+async function startHostServer(): Promise<{ ok: boolean; message: string }> {
+  if (hostServerProcess) {
+    return { ok: true, message: "Server is already running." };
+  }
+
+  const sourceRoot = resolveStoredSourceRoot();
+  if (!sourceRoot) {
+    return { ok: false, message: "Set/download Minecraft package first." };
+  }
+
+  const serverRoot = resolveServerSourceRoot();
+  if (!serverRoot) {
+    return { ok: false, message: "Could not find minecraft_server with Server.launch." };
+  }
+
+  const javaCommand = resolveJavaCommand();
+  if (!javaCommand) {
+    return { ok: false, message: "Java not found on PATH." };
+  }
+
+  const prep = prepareSourceProjectForLaunch(serverRoot);
+  if (!prep.ok) {
+    return { ok: false, message: prep.message };
+  }
+
+  const launchConfig = resolveServerProjectLaunch(serverRoot, javaCommand);
+  if (!launchConfig) {
+    return { ok: false, message: "Failed to resolve server launch configuration." };
+  }
+
+  try {
+    hostServerLog.length = 0;
+    appendHostLog(hostServerLog, `[host] ${prep.message}`);
+    const child = spawn(launchConfig.command, launchConfig.args, {
+      cwd: launchConfig.cwd,
+      windowsHide: true,
+      stdio: "pipe"
+    });
+    hostServerProcess = child;
+
+    child.stdout.on("data", (chunk) => consumeHostLogChunk(hostServerLog, String(chunk)));
+    child.stderr.on("data", (chunk) => consumeHostLogChunk(hostServerLog, String(chunk)));
+    child.on("exit", (code, signal) => {
+      appendHostLog(
+        hostServerLog,
+        `[host] Server stopped (${signal ? `signal ${signal}` : `exit ${String(code ?? "unknown")}`}).`
+      );
+      hostServerProcess = null;
+    });
+    child.on("error", (error) => {
+      appendHostLog(hostServerLog, `[host] Server error: ${error.message}`);
+      hostServerProcess = null;
+    });
+
+    return { ok: true, message: "Server started from minecraft_server source." };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown server start error";
+    return { ok: false, message: `Failed to start server: ${message}` };
+  }
+}
+
+async function stopHostServer(): Promise<{ ok: boolean; message: string }> {
+  if (!hostServerProcess) {
+    return { ok: true, message: "Server is not running." };
+  }
+
+  hostServerProcess.kill();
+  return { ok: true, message: "Stopping server..." };
+}
+
+async function startHostTunnel(): Promise<{ ok: boolean; message: string }> {
+  if (hostTunnelProcess) {
+    return { ok: true, message: "Playit tunnel is already running." };
+  }
+
+  try {
+    const playitPath = await ensurePlayitBinary();
+    hostTunnelLog.length = 0;
+    hostPublicAddress = "";
+    appendHostLog(hostTunnelLog, `[playit] Starting tunnel agent...`);
+
+    const child = spawn(playitPath, [], {
+      cwd: path.dirname(playitPath),
+      windowsHide: true,
+      stdio: "pipe"
+    });
+    hostTunnelProcess = child;
+
+    child.stdout.on("data", (chunk) => {
+      const text = String(chunk);
+      consumeHostLogChunk(hostTunnelLog, text);
+      updatePublicAddressFromLog(text);
+    });
+    child.stderr.on("data", (chunk) => {
+      const text = String(chunk);
+      consumeHostLogChunk(hostTunnelLog, text);
+      updatePublicAddressFromLog(text);
+    });
+    child.on("exit", (code, signal) => {
+      appendHostLog(
+        hostTunnelLog,
+        `[playit] Tunnel stopped (${signal ? `signal ${signal}` : `exit ${String(code ?? "unknown")}`}).`
+      );
+      hostTunnelProcess = null;
+      hostPublicAddress = "";
+    });
+    child.on("error", (error) => {
+      appendHostLog(hostTunnelLog, `[playit] Error: ${error.message}`);
+      hostTunnelProcess = null;
+      hostPublicAddress = "";
+    });
+
+    return {
+      ok: true,
+      message:
+        "Playit tunnel started. If first run, follow Playit login/claim prompt from tunnel logs."
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown tunnel start error";
+    return { ok: false, message: `Failed to start Playit tunnel: ${message}` };
+  }
+}
+
+async function stopHostTunnel(): Promise<{ ok: boolean; message: string }> {
+  if (!hostTunnelProcess) {
+    return { ok: true, message: "Playit tunnel is not running." };
+  }
+
+  hostTunnelProcess.kill();
+  return { ok: true, message: "Stopping Playit tunnel..." };
+}
+
+function resolveServerSourceRoot(): string | null {
+  const sourceRoot = resolveStoredSourceRoot();
+  if (!sourceRoot) {
+    return null;
+  }
+
+  const candidates = [
+    path.join(sourceRoot, "minecraft_server"),
+    path.join(path.dirname(sourceRoot), "minecraft_server"),
+    sourceRoot
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(path.join(candidate, "Server.launch"))) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function resolveServerProjectLaunch(serverRoot: string, javaCommand: string): LaunchConfig | null {
+  const launchFile = path.join(serverRoot, "Server.launch");
+  const gameDir = path.join(serverRoot, "game");
+  const binDir = path.join(serverRoot, "bin");
+  if (!existsSync(launchFile) || !existsSync(gameDir) || !existsSync(binDir)) {
+    return null;
+  }
+
+  const mainClass = extractMainType(launchFile) ?? "net.minecraft.server.MinecraftServer";
+  const classpath = buildRuntimeClasspath(serverRoot);
+  return {
+    command: javaCommand,
+    args: ["-cp", classpath.length > 0 ? classpath : binDir, mainClass],
+    cwd: gameDir
+  };
+}
+
+function extractMainType(launchFile: string): string | null {
+  try {
+    const xml = readFileSync(launchFile, "utf8");
+    const match = xml.match(/key="org\.eclipse\.jdt\.launching\.MAIN_TYPE"\s+value="([^"]*)"/);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function ensurePlayitBinary(): Promise<string> {
+  const binDir = path.join(app.getPath("userData"), "playit");
+  mkdirSync(binDir, { recursive: true });
+  const playitPath = path.join(binDir, "playit.exe");
+  if (!existsSync(playitPath)) {
+    await downloadFile(PLAYIT_DOWNLOAD_URL, playitPath);
+  }
+  return playitPath;
+}
+
+function consumeHostLogChunk(buffer: string[], chunk: string): void {
+  const lines = chunk
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  for (const line of lines) {
+    appendHostLog(buffer, line);
+  }
+}
+
+function appendHostLog(buffer: string[], line: string): void {
+  buffer.push(line);
+  if (buffer.length > 250) {
+    buffer.splice(0, buffer.length - 250);
+  }
+}
+
+function updatePublicAddressFromLog(text: string): void {
+  const match =
+    text.match(/\b[a-z0-9.-]+\.playit\.gg(?::\d+)?\b/i) ??
+    text.match(/https?:\/\/[^\s]+/i);
+  if (match?.[0]) {
+    hostPublicAddress = match[0];
+  }
 }
 
 app.whenReady().then(async () => {
