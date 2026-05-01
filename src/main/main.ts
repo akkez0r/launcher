@@ -157,25 +157,20 @@ function wireIpc(): void {
     };
   });
 
-  const authNotImplementedResponse = {
-    ok: false,
-    message: "Authentication IPC is not implemented yet."
-  };
-
   ipcMain.handle(IPC_CHANNELS.AUTH_REGISTER, async () => {
-    return authNotImplementedResponse;
+    throw new Error("Authentication IPC is not implemented yet.");
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTH_LOGIN, async () => {
-    return authNotImplementedResponse;
+    throw new Error("Authentication IPC is not implemented yet.");
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTH_LOGOUT, async () => {
-    return authNotImplementedResponse;
+    throw new Error("Authentication IPC is not implemented yet.");
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTH_ME, async () => {
-    return authNotImplementedResponse;
+    throw new Error("Authentication IPC is not implemented yet.");
   });
 
   ipcMain.handle(IPC_CHANNELS.SELECT_MINECRAFT_EXE, async () => {
