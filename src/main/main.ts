@@ -31,21 +31,21 @@ type LauncherStore = {
   updateChannel: string;
   lastSeenVersion: string;
   minecraftExePath: string;
-  minecraftRepoUrl: string;
 };
 
 const store = new Store<LauncherStore>({
   defaults: {
     updateChannel: "latest",
     lastSeenVersion: app.getVersion(),
-    minecraftExePath: "",
-    minecraftRepoUrl: ""
+    minecraftExePath: ""
   }
 });
 
 let mainWindow: BrowserWindow | null = null;
 const DEFAULT_PROGRAM_ARGS =
   "--username Player --uuid - --session - --version 1.5.2 --gameDir . --assetsDir .\\assets --assetIndex 1.4 --accessToken - --userProperties {} --userType legacy --versionType snapshot --skinProxy pre-1.8";
+const LOCKED_MINECRAFT_SOURCE_ZIP_URL =
+  "https://github.com/akkez0r/launcher/releases/latest/download/minecraft-source.zip";
 
 type LaunchConfig = {
   command: string;
@@ -136,8 +136,7 @@ function wireIpc(): void {
     return {
       version: app.getVersion(),
       updateChannel: store.get("updateChannel"),
-      minecraftExePath: store.get("minecraftExePath"),
-      minecraftRepoUrl: store.get("minecraftRepoUrl")
+      minecraftExePath: store.get("minecraftExePath")
     };
   });
 
@@ -166,10 +165,6 @@ function wireIpc(): void {
     store.set("minecraftExePath", value.trim());
   });
 
-  ipcMain.handle(IPC_CHANNELS.SET_MINECRAFT_REPO_URL, async (_event, value: string) => {
-    store.set("minecraftRepoUrl", value.trim());
-  });
-
   ipcMain.handle(IPC_CHANNELS.DOWNLOAD_MINECRAFT_FROM_GITHUB, async () => {
     return downloadMinecraftFromGithub();
   });
@@ -185,7 +180,7 @@ function wireIpc(): void {
     }
 
     if (!targetPath) {
-      return { ok: false, message: "Set Minecraft path first or configure GitHub source URL." };
+      return { ok: false, message: "Set Minecraft path first or download your Minecraft package." };
     }
 
     if (!existsSync(targetPath)) {
@@ -745,22 +740,7 @@ function readLaunchLogSnippet(logPath: string): string {
 }
 
 async function downloadMinecraftFromGithub(): Promise<{ ok: boolean; message: string; path?: string }> {
-  const repoInput = store.get("minecraftRepoUrl").trim();
-  if (!repoInput) {
-    return {
-      ok: false,
-      message:
-        "Minecraft source path is missing and GitHub URL is not set. Enter a GitHub repo/zip URL first."
-    };
-  }
-
-  const zipUrl = normalizeGithubZipUrl(repoInput);
-  if (!zipUrl) {
-    return {
-      ok: false,
-      message: "Unsupported GitHub URL format. Use a repo URL or a direct .zip archive URL."
-    };
-  }
+  const zipUrl = LOCKED_MINECRAFT_SOURCE_ZIP_URL;
 
   const installDir = path.join(app.getPath("userData"), "minecraft-source");
   const tempRoot = path.join(app.getPath("temp"), "akkez-launcher");
@@ -780,57 +760,29 @@ async function downloadMinecraftFromGithub(): Promise<{ ok: boolean; message: st
     const zip = new AdmZip(zipPath);
     zip.extractAllTo(extractDir, true);
 
-    const sourceRoot = findSourceRoot(extractDir);
-    if (!sourceRoot) {
+    const projectRoot = findProjectRoot(extractDir);
+    if (!projectRoot) {
       return {
         ok: false,
-        message: "Downloaded archive does not contain a Minecraft source project with Client.launch."
+        message:
+          "Downloaded package does not contain expected Minecraft project files (Client.launch)."
       };
     }
 
-    cpSync(sourceRoot, installDir, { recursive: true });
+    cpSync(projectRoot, installDir, { recursive: true });
     store.set("minecraftExePath", installDir);
     return {
       ok: true,
-      message: `Minecraft source downloaded from GitHub to ${installDir}.`,
+      message: `Your Minecraft source downloaded to ${installDir}.`,
       path: installDir
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown download error";
-    return { ok: false, message: `Failed to download Minecraft source: ${message}` };
+    return {
+      ok: false,
+      message: `Failed to download your Minecraft source package: ${message}`
+    };
   }
-}
-
-function normalizeGithubZipUrl(input: string): string | null {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  if (/^https?:\/\/.+\.zip(?:\?.*)?$/i.test(trimmed)) {
-    return trimmed;
-  }
-
-  const repoMatch = trimmed.match(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/)?$/i
-  );
-  if (repoMatch) {
-    const owner = repoMatch[1];
-    const repo = repoMatch[2];
-    return `https://github.com/${owner}/${repo}/archive/refs/heads/main.zip`;
-  }
-
-  const branchMatch = trimmed.match(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)\/tree\/([^/]+)(?:\/)?$/i
-  );
-  if (branchMatch) {
-    const owner = branchMatch[1];
-    const repo = branchMatch[2];
-    const branch = branchMatch[3];
-    return `https://github.com/${owner}/${repo}/archive/refs/heads/${branch}.zip`;
-  }
-
-  return null;
 }
 
 async function downloadFile(url: string, destinationPath: string): Promise<void> {
@@ -881,7 +833,7 @@ function fetchUrl(url: string): Promise<{ ok: boolean; status: number; body: Inc
   });
 }
 
-function findSourceRoot(extractDir: string): string | null {
+function findProjectRoot(extractDir: string): string | null {
   const stack = [extractDir];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -889,7 +841,13 @@ function findSourceRoot(extractDir: string): string | null {
       continue;
     }
 
-    if (existsSync(path.join(current, "Client.launch")) && existsSync(path.join(current, "src"))) {
+    const hasDirectClient = existsSync(path.join(current, "Client.launch"));
+    const hasNestedClient = existsSync(path.join(current, "minecraft", "Client.launch"));
+    if ((hasDirectClient || hasNestedClient) && existsSync(path.join(current, "libraries"))) {
+      return current;
+    }
+
+    if (hasDirectClient && existsSync(path.join(current, "src"))) {
       return current;
     }
 
