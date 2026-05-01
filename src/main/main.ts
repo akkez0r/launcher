@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "node:path";
@@ -32,6 +32,12 @@ import {
   LauncherAppInfo,
   UpdateEventPayload
 } from "../shared/ipc";
+import {
+  AuthLoginRequest,
+  AuthRegisterRequest,
+  AuthSessionResponse,
+  AuthUser
+} from "../shared/auth";
 
 type LauncherStore = {
   updateChannel: string;
@@ -54,6 +60,11 @@ const LOCKED_MINECRAFT_SOURCE_ZIP_URL =
   "https://github.com/akkez0r/launcher/releases/latest/download/minecraft-source.zip";
 const PLAYIT_DOWNLOAD_URL =
   "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe";
+const CMC_API_BASE_URL = (process.env.CMC_API_BASE_URL?.trim() || "http://127.0.0.1:8787").replace(
+  /\/+$/,
+  ""
+);
+const CMC_SESSION_FILE_NAME = "cmc-auth-session.bin";
 
 type LaunchConfig = {
   command: string;
@@ -64,6 +75,11 @@ type LaunchConfig = {
 type SourcePrepResult = {
   ok: boolean;
   message: string;
+};
+
+type AuthApiRequestOptions = {
+  body?: unknown;
+  accessToken?: string;
 };
 
 let hostServerProcess: ChildProcessWithoutNullStreams | null = null;
@@ -147,30 +163,46 @@ function wireUpdater(): void {
 
 function wireIpc(): void {
   ipcMain.handle(IPC_CHANNELS.APP_INFO, (): LauncherAppInfo => {
+    const session = loadStoredSession();
+    const user = session?.user;
     return {
       version: app.getVersion(),
       updateChannel: store.get("updateChannel"),
       minecraftExePath: store.get("minecraftExePath"),
-      isLoggedIn: false,
-      cmcUsername: "",
-      cmcUuid: ""
+      isLoggedIn: Boolean(user),
+      cmcUsername: user?.username ?? "",
+      cmcUuid: user?.cmcUuid ?? ""
     };
   });
 
-  ipcMain.handle(IPC_CHANNELS.AUTH_REGISTER, async () => {
-    throw new Error("Authentication IPC is not implemented yet.");
+  ipcMain.handle(IPC_CHANNELS.AUTH_REGISTER, async (_event, payload: AuthRegisterRequest) => {
+    const session = await authRegister(payload);
+    saveSession(session);
+    return session;
   });
 
-  ipcMain.handle(IPC_CHANNELS.AUTH_LOGIN, async () => {
-    throw new Error("Authentication IPC is not implemented yet.");
+  ipcMain.handle(IPC_CHANNELS.AUTH_LOGIN, async (_event, payload: AuthLoginRequest) => {
+    const session = await authLogin(payload);
+    saveSession(session);
+    return session;
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTH_LOGOUT, async () => {
-    throw new Error("Authentication IPC is not implemented yet.");
+    const session = loadStoredSession();
+    if (session) {
+      try {
+        await authLogout(session.refreshToken);
+      } catch {
+        // Ignore logout API errors and still clear local session.
+      }
+    }
+    clearStoredSession();
+    return { ok: true };
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTH_ME, async () => {
-    throw new Error("Authentication IPC is not implemented yet.");
+    const session = await ensureValidSession();
+    return { user: session.user };
   });
 
   ipcMain.handle(IPC_CHANNELS.SELECT_MINECRAFT_EXE, async () => {
@@ -241,6 +273,15 @@ function wireIpc(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.LAUNCH_MINECRAFT, async () => {
+    let session: AuthSessionResponse;
+    try {
+      session = await ensureValidSession();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown authentication error.";
+      return { ok: false, message: `Login required before launch: ${message}` };
+    }
+
     let targetPath = store.get("minecraftExePath").trim();
     if (!targetPath || !existsSync(targetPath)) {
       const bootstrap = await downloadMinecraftFromGithub();
@@ -284,10 +325,11 @@ function wireIpc(): void {
             "No launch target found. Pick a Minecraft source folder (with Client.launch) or a .exe."
         };
       }
+      const launchArgs = injectCmcIdentityArgs(launchConfig.args, session.user);
 
       const launchLogPath = createLaunchLogPath();
       const launchLogFd = openSync(launchLogPath, "a");
-      const child = spawn(launchConfig.command, launchConfig.args, {
+      const child = spawn(launchConfig.command, launchArgs, {
         cwd: launchConfig.cwd,
         detached: true,
         stdio: ["ignore", launchLogFd, launchLogFd]
@@ -318,6 +360,198 @@ function wireIpc(): void {
   ipcMain.handle(IPC_CHANNELS.INSTALL_UPDATE, async () => {
     autoUpdater.quitAndInstall();
   });
+}
+
+function getSessionFilePath(): string {
+  return path.join(app.getPath("userData"), CMC_SESSION_FILE_NAME);
+}
+
+function saveSession(session: AuthSessionResponse): void {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error("Secure storage is not available on this device.");
+  }
+
+  const payload = JSON.stringify(session);
+  const encrypted = safeStorage.encryptString(payload);
+  writeFileSync(getSessionFilePath(), encrypted);
+}
+
+function loadStoredSession(): AuthSessionResponse | null {
+  const filePath = getSessionFilePath();
+  if (!existsSync(filePath)) {
+    return null;
+  }
+
+  if (!safeStorage.isEncryptionAvailable()) {
+    clearStoredSession();
+    return null;
+  }
+
+  try {
+    const encrypted = readFileSync(filePath);
+    const decrypted = safeStorage.decryptString(encrypted);
+    const parsed: unknown = JSON.parse(decrypted);
+    if (!isAuthSessionResponse(parsed)) {
+      clearStoredSession();
+      return null;
+    }
+    return parsed;
+  } catch {
+    clearStoredSession();
+    return null;
+  }
+}
+
+function clearStoredSession(): void {
+  const filePath = getSessionFilePath();
+  if (!existsSync(filePath)) {
+    return;
+  }
+  unlinkSync(filePath);
+}
+
+async function authRegister(payload: AuthRegisterRequest): Promise<AuthSessionResponse> {
+  return requestAuthApi<AuthSessionResponse>("POST", "/auth/register", { body: payload });
+}
+
+async function authLogin(payload: AuthLoginRequest): Promise<AuthSessionResponse> {
+  return requestAuthApi<AuthSessionResponse>("POST", "/auth/login", { body: payload });
+}
+
+async function authRefresh(refreshToken: string): Promise<AuthSessionResponse> {
+  return requestAuthApi<AuthSessionResponse>("POST", "/auth/refresh", {
+    body: { refreshToken }
+  });
+}
+
+async function authMe(accessToken: string): Promise<{ user: AuthUser }> {
+  return requestAuthApi<{ user: AuthUser }>("GET", "/auth/me", { accessToken });
+}
+
+async function authLogout(refreshToken: string): Promise<{ ok: boolean }> {
+  return requestAuthApi<{ ok: boolean }>("POST", "/auth/logout", {
+    body: { refreshToken }
+  });
+}
+
+async function requestAuthApi<T>(
+  method: "GET" | "POST",
+  endpoint: string,
+  options: AuthApiRequestOptions = {}
+): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+  if (options.accessToken) {
+    headers.Authorization = `Bearer ${options.accessToken}`;
+  }
+
+  const response = await fetch(`${CMC_API_BASE_URL}${endpoint}`, {
+    method,
+    headers,
+    body: method === "GET" ? undefined : JSON.stringify(options.body ?? {})
+  });
+
+  const rawBody = await response.text();
+  const parsed = rawBody ? tryParseJson(rawBody) : null;
+  if (!response.ok) {
+    const errorMessage = extractApiError(parsed) ?? `Auth request failed (${response.status})`;
+    throw new Error(errorMessage);
+  }
+
+  return (parsed ?? {}) as T;
+}
+
+function tryParseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function extractApiError(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const maybeError = (payload as { error?: unknown }).error;
+  if (typeof maybeError === "string" && maybeError.trim()) {
+    return maybeError;
+  }
+  return null;
+}
+
+function isAuthSessionResponse(value: unknown): value is AuthSessionResponse {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const session = value as Partial<AuthSessionResponse>;
+  return (
+    typeof session.accessToken === "string" &&
+    typeof session.refreshToken === "string" &&
+    isAuthUser(session.user)
+  );
+}
+
+function isAuthUser(value: unknown): value is AuthUser {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const user = value as Partial<AuthUser>;
+  return (
+    typeof user.id === "string" &&
+    typeof user.username === "string" &&
+    typeof user.cmcUuid === "string"
+  );
+}
+
+async function ensureValidSession(): Promise<AuthSessionResponse> {
+  const stored = loadStoredSession();
+  if (!stored) {
+    throw new Error("No saved session.");
+  }
+
+  try {
+    const me = await authMe(stored.accessToken);
+    const session = { ...stored, user: me.user };
+    saveSession(session);
+    return session;
+  } catch {
+    try {
+      const refreshed = await authRefresh(stored.refreshToken);
+      const me = await authMe(refreshed.accessToken);
+      const session = { ...refreshed, user: me.user };
+      saveSession(session);
+      return session;
+    } catch {
+      clearStoredSession();
+      throw new Error("Session expired. Please log in again.");
+    }
+  }
+}
+
+function injectCmcIdentityArgs(currentArgs: string[], user: AuthUser): string[] {
+  const withUsername = upsertLaunchArg(currentArgs, "--username", user.username);
+  return upsertLaunchArg(withUsername, "--uuid", user.cmcUuid);
+}
+
+function upsertLaunchArg(args: string[], flag: string, value: string): string[] {
+  const next = [...args];
+  const index = next.findIndex((arg) => arg === flag);
+  if (index >= 0) {
+    if (index + 1 < next.length) {
+      next[index + 1] = value;
+    } else {
+      next.push(value);
+    }
+    return next;
+  }
+
+  next.push(flag, value);
+  return next;
 }
 
 function resolveLaunchConfig(targetPath: string): LaunchConfig | null {
