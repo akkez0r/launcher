@@ -2,7 +2,15 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "node:path";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import {
   IPC_CHANNELS,
@@ -32,6 +40,11 @@ type LaunchConfig = {
   command: string;
   args: string[];
   cwd?: string;
+};
+
+type SourcePrepResult = {
+  ok: boolean;
+  message: string;
 };
 
 function sendUpdateEvent(payload: UpdateEventPayload): void {
@@ -118,10 +131,10 @@ function wireIpc(): void {
 
   ipcMain.handle(IPC_CHANNELS.SELECT_MINECRAFT_EXE, async () => {
     const result = await dialog.showOpenDialog({
-      title: "Select Minecraft source folder, executable, or JAR",
+      title: "Select Minecraft source folder or executable",
       properties: ["openFile", "openDirectory"],
       filters: [
-        { name: "Launch files", extensions: ["exe", "jar"] },
+        { name: "Launch files", extensions: ["exe"] },
         { name: "All files", extensions: ["*"] }
       ]
     });
@@ -152,11 +165,21 @@ function wireIpc(): void {
     }
 
     try {
-      if (isJavaLaunchTarget(targetPath) && !hasJavaRuntime()) {
+      const sourceRoot = resolveSourceRootFromTarget(targetPath);
+      let launchNote = "";
+      if (sourceRoot && !hasJavaRuntime()) {
         return {
           ok: false,
-          message: "Java not found on PATH. Install Java or select a direct .exe."
+          message: "Java not found on PATH. Install a JDK/JRE so source launch can run."
         };
+      }
+
+      if (sourceRoot) {
+        const prepResult = prepareSourceProjectForLaunch(sourceRoot);
+        if (!prepResult.ok) {
+          return { ok: false, message: prepResult.message };
+        }
+        launchNote = prepResult.message;
       }
 
       const launchConfig = resolveLaunchConfig(targetPath);
@@ -164,7 +187,7 @@ function wireIpc(): void {
         return {
           ok: false,
           message:
-            "No launch target found. Pick a source folder, .exe/.jar, or folder with RetroMCP-Java-GUI.jar."
+            "No launch target found. Pick a Minecraft source folder (with Client.launch) or a .exe."
         };
       }
 
@@ -174,7 +197,8 @@ function wireIpc(): void {
         stdio: "ignore"
       });
       child.unref();
-      return { ok: true, message: "Minecraft launched." };
+      const message = launchNote ? `${launchNote} Minecraft launched.` : "Minecraft launched.";
+      return { ok: true, message };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown launch error.";
       return { ok: false, message: `Failed to launch: ${message}` };
@@ -199,17 +223,6 @@ function resolveLaunchConfig(targetPath: string): LaunchConfig | null {
       return { command: targetPath, args: [], cwd: path.dirname(targetPath) };
     }
 
-    if (extension === ".jar") {
-      if (!javaCommand) {
-        return null;
-      }
-      return {
-        command: javaCommand,
-        args: ["-jar", targetPath],
-        cwd: path.dirname(targetPath)
-      };
-    }
-
     return null;
   }
 
@@ -228,18 +241,6 @@ function resolveLaunchConfig(targetPath: string): LaunchConfig | null {
     }
   }
 
-  const retroJar = path.join(targetPath, "RetroMCP-Java-GUI.jar");
-  if (existsSync(retroJar)) {
-    if (!javaCommand) {
-      return null;
-    }
-    return {
-      command: javaCommand,
-      args: ["-jar", retroJar],
-      cwd: targetPath
-    };
-  }
-
   const minecraftExe = path.join(targetPath, "MinecraftLauncher.exe");
   if (existsSync(minecraftExe)) {
     return { command: minecraftExe, args: [], cwd: targetPath };
@@ -248,21 +249,13 @@ function resolveLaunchConfig(targetPath: string): LaunchConfig | null {
   return null;
 }
 
-function isJavaLaunchTarget(targetPath: string): boolean {
+function resolveSourceRootFromTarget(targetPath: string): string | null {
   const stats = statSync(targetPath);
-  if (stats.isFile()) {
-    return path.extname(targetPath).toLowerCase() === ".jar";
-  }
-
   if (!stats.isDirectory()) {
-    return false;
+    return null;
   }
 
-  if (resolveSourceRoot(targetPath)) {
-    return true;
-  }
-
-  return existsSync(path.join(targetPath, "RetroMCP-Java-GUI.jar"));
+  return resolveSourceRoot(targetPath);
 }
 
 function hasJavaRuntime(): boolean {
@@ -284,6 +277,18 @@ function resolveJavaCommand(): string | null {
   });
   if (javaCheck.status === 0) {
     return "java";
+  }
+
+  return null;
+}
+
+function resolveJavacCommand(): string | null {
+  const javacCheck = spawnSync("where", ["javac"], {
+    windowsHide: true,
+    stdio: "ignore"
+  });
+  if (javacCheck.status === 0) {
+    return "javac";
   }
 
   return null;
@@ -348,6 +353,148 @@ function extractProgramArgs(launchFile: string): string | null {
 function tokenizeArgs(argsLine: string): string[] {
   const matches = argsLine.match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
   return matches.map((item) => item.replace(/^"|"$/g, ""));
+}
+
+function prepareSourceProjectForLaunch(sourceRoot: string): SourcePrepResult {
+  const updateMessage = updateSourceFromGit(sourceRoot);
+  const compileResult = compileSourceProject(sourceRoot);
+  if (!compileResult.ok) {
+    return compileResult;
+  }
+
+  return {
+    ok: true,
+    message: `${updateMessage} ${compileResult.message}`.trim()
+  };
+}
+
+function updateSourceFromGit(sourceRoot: string): string {
+  if (!existsSync(path.join(sourceRoot, ".git"))) {
+    return "No git repo detected; skipping source update.";
+  }
+
+  const result = spawnSync("git", ["pull", "--ff-only"], {
+    cwd: sourceRoot,
+    windowsHide: true,
+    encoding: "utf8"
+  });
+
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  if (result.status !== 0) {
+    return `Git update failed (${firstLine(output)}). Launching local source.`;
+  }
+
+  if (/already up to date/i.test(output)) {
+    return "Minecraft source already up to date.";
+  }
+
+  return "Minecraft source updated from git.";
+}
+
+function compileSourceProject(sourceRoot: string): SourcePrepResult {
+  const javacCommand = resolveJavacCommand();
+  if (!javacCommand) {
+    return {
+      ok: false,
+      message: "JDK not found (javac missing on PATH). Install a JDK to run source builds."
+    };
+  }
+
+  const srcDir = path.join(sourceRoot, "src");
+  const binDir = path.join(sourceRoot, "bin");
+  if (!existsSync(srcDir)) {
+    return {
+      ok: false,
+      message: "Source launch requires a src folder. Could not compile Minecraft source."
+    };
+  }
+
+  mkdirSync(binDir, { recursive: true });
+
+  const javaFiles = collectJavaFiles(srcDir, sourceRoot);
+  if (javaFiles.length === 0) {
+    return {
+      ok: false,
+      message: "No Java files found under src; cannot compile source project."
+    };
+  }
+
+  const classpath = buildCompileClasspath(sourceRoot);
+  const argsFile = path.join(sourceRoot, ".launcher-javac-args.txt");
+  const lines = ["-cp", classpath, "-d", "bin", ...javaFiles];
+
+  try {
+    writeFileSync(argsFile, lines.join("\n"), "utf8");
+    const result = spawnSync(javacCommand, [`@${argsFile}`], {
+      cwd: sourceRoot,
+      windowsHide: true,
+      encoding: "utf8"
+    });
+    if (result.status !== 0) {
+      const failure = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+      return {
+        ok: false,
+        message: `Source compile failed: ${firstLine(failure)}`
+      };
+    }
+  } finally {
+    if (existsSync(argsFile)) {
+      unlinkSync(argsFile);
+    }
+  }
+
+  return { ok: true, message: "Source project compiled." };
+}
+
+function buildCompileClasspath(sourceRoot: string): string {
+  const entries = ["bin"];
+  const jarsDir = path.join(sourceRoot, "jars");
+  const libsDir = path.join(sourceRoot, "libraries");
+
+  if (existsSync(jarsDir)) {
+    entries.push("jars/*");
+  }
+  if (existsSync(libsDir)) {
+    entries.push("libraries/*");
+  }
+
+  return entries.join(";");
+}
+
+function collectJavaFiles(rootDir: string, sourceRoot: string): string[] {
+  const output: string[] = [];
+  const stack = [rootDir];
+
+  while (stack.length > 0) {
+    const currentDir = stack.pop();
+    if (!currentDir) {
+      continue;
+    }
+
+    const entries = readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+
+      if (entry.isFile() && fullPath.endsWith(".java")) {
+        output.push(path.relative(sourceRoot, fullPath).replace(/\\/g, "/"));
+      }
+    }
+  }
+
+  return output.sort();
+}
+
+function firstLine(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return "unknown error";
+  }
+
+  return trimmed.split(/\r?\n/)[0] ?? "unknown error";
 }
 
 app.whenReady().then(async () => {
