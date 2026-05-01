@@ -170,8 +170,25 @@ export function App(): JSX.Element {
           cmcUuid: me.user.cmcUuid ?? info.cmcUuid
         };
       } catch {
-        nextInfo = info;
+        try {
+          // Session might have been cleared in main; re-read app info immediately.
+          nextInfo = await window.launcherApi.getAppInfo();
+        } catch {
+          nextInfo = {
+            ...info,
+            isLoggedIn: false,
+            cmcUsername: "",
+            cmcUuid: ""
+          };
+        }
       }
+    }
+    if (!nextInfo.isLoggedIn) {
+      nextInfo = {
+        ...nextInfo,
+        cmcUsername: "",
+        cmcUuid: ""
+      };
     }
     setAppInfo(nextInfo);
     setMinecraftExePath(nextInfo.minecraftExePath ?? "");
@@ -733,6 +750,11 @@ export function App(): JSX.Element {
                 try {
                   await window.launcherApi.logout();
                   await refreshAppInfo();
+                  setRegisterUsername("");
+                  setRegisterEmail("");
+                  setLoginEmailOrUsername("");
+                  setRegisterPassword("");
+                  setLoginPassword("");
                   setAuthStatus("Logged out successfully.");
                   setLaunchStatus("Launch blocked until you log in again.");
                 } catch (error) {
