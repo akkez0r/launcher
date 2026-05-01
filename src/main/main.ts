@@ -610,7 +610,9 @@ function resolveCmcApiBaseUrl(): string {
   }
 
   const host = parsed.hostname.toLowerCase();
-  const isLoopbackHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  const normalizedHost = host.replace(/^\[(.*)\]$/, "$1");
+  const isLoopbackHost =
+    normalizedHost === "localhost" || normalizedHost === "127.0.0.1" || normalizedHost === "::1";
   if (protocol !== "https:" && !isLoopbackHost) {
     throw new Error(
       "Invalid CMC_API_BASE_URL: non-local endpoints must use https (http is allowed only for localhost/127.0.0.1/::1)."
