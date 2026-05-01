@@ -1,18 +1,23 @@
-import { createServer } from "node:http";
+import cors from "cors";
+import dotenv from "dotenv";
+import express from "express";
 
-const cmcDbUrl = process.env.CMC_DB_URL;
+dotenv.config();
 
-if (!cmcDbUrl) {
-  console.error("CMC_DB_URL is required to start cmc-auth");
-  process.exit(1);
+if (!process.env.CMC_DB_URL) {
+  throw new Error("CMC_DB_URL is required to start cmc-auth");
 }
 
-const port = Number(process.env.PORT ?? 4000);
-const server = createServer((_req, res) => {
-  res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify({ status: "ok" }));
+const app = express();
+const port = Number(process.env.PORT ?? 8787);
+
+app.use(cors());
+app.use(express.json());
+
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
 });
 
-server.listen(port, () => {
+app.listen(port, () => {
   console.log(`cmc-auth listening on port ${port}`);
 });
