@@ -320,11 +320,8 @@ function resolveSourceProjectLaunch(
   }
 
   const launchArgs = extractProgramArgs(launchFile) ?? DEFAULT_PROGRAM_ARGS;
-  const classpath = [
-    binDir,
-    path.join(sourceRoot, "jars", "*"),
-    path.join(sourceRoot, "libraries", "*")
-  ].join(";");
+  const runtimeClasspath = buildRuntimeClasspath(sourceRoot);
+  const classpath = runtimeClasspath.length > 0 ? runtimeClasspath : binDir;
 
   return {
     command: javaCommand,
@@ -421,7 +418,13 @@ function compileSourceProject(sourceRoot: string): SourcePrepResult {
 
   const classpath = buildCompileClasspath(sourceRoot);
   const argsFile = path.join(sourceRoot, ".launcher-javac-args.txt");
-  const lines = ["-cp", classpath, "-d", "bin", ...javaFiles];
+  const lines = [
+    "-cp",
+    quoteArgfileValue(classpath),
+    "-d",
+    quoteArgfileValue("bin"),
+    ...javaFiles.map((file) => quoteArgfileValue(file))
+  ];
 
   try {
     writeFileSync(argsFile, lines.join("\n"), "utf8");
@@ -447,18 +450,79 @@ function compileSourceProject(sourceRoot: string): SourcePrepResult {
 }
 
 function buildCompileClasspath(sourceRoot: string): string {
-  const entries = ["bin"];
-  const jarsDir = path.join(sourceRoot, "jars");
-  const libsDir = path.join(sourceRoot, "libraries");
+  const entries = ["bin", ...collectJarFiles(sourceRoot).map((jarPath) => normalizePathForJava(path.relative(sourceRoot, jarPath)))];
+  return entries.join(path.delimiter);
+}
 
-  if (existsSync(jarsDir)) {
-    entries.push("jars/*");
-  }
-  if (existsSync(libsDir)) {
-    entries.push("libraries/*");
+function buildRuntimeClasspath(sourceRoot: string): string {
+  const entries = [path.join(sourceRoot, "bin"), ...collectJarFiles(sourceRoot).map((jarPath) => normalizePathForJava(jarPath))];
+  return entries.join(path.delimiter);
+}
+
+function collectJarFiles(sourceRoot: string): string[] {
+  const includeRoots = resolveDependencyRoots(sourceRoot);
+
+  const output: string[] = [];
+  for (const root of includeRoots) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const currentDir = stack.pop();
+      if (!currentDir) {
+        continue;
+      }
+
+      const entries = readdirSync(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(fullPath);
+          continue;
+        }
+
+        if (entry.isFile() && fullPath.toLowerCase().endsWith(".jar")) {
+          output.push(fullPath);
+        }
+      }
+    }
   }
 
-  return entries.join(";");
+  return output.sort();
+}
+
+function normalizePathForJava(filePath: string): string {
+  return filePath.replace(/\\/g, "/");
+}
+
+function resolveDependencyRoots(sourceRoot: string): string[] {
+  const candidates: string[] = [];
+  let current = sourceRoot;
+  while (true) {
+    candidates.push(current);
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+
+  const roots: string[] = [];
+  const seen = new Set<string>();
+
+  for (const base of candidates) {
+    if (!base || seen.has(base)) {
+      continue;
+    }
+    seen.add(base);
+
+    for (const folderName of ["jars", "libraries", "lib"]) {
+      const dependencyRoot = path.join(base, folderName);
+      if (existsSync(dependencyRoot) && statSync(dependencyRoot).isDirectory()) {
+        roots.push(dependencyRoot);
+      }
+    }
+  }
+
+  return roots;
 }
 
 function collectJavaFiles(rootDir: string, sourceRoot: string): string[] {
@@ -495,6 +559,11 @@ function firstLine(text: string): string {
   }
 
   return trimmed.split(/\r?\n/)[0] ?? "unknown error";
+}
+
+function quoteArgfileValue(value: string): string {
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${escaped}"`;
 }
 
 app.whenReady().then(async () => {
