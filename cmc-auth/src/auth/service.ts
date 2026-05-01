@@ -87,9 +87,14 @@ export class AuthService {
     return this.createSession(user);
   }
 
-  async login(input: { email: string; password: string }): Promise<AuthSession> {
-    const email = input.email.trim().toLowerCase();
-    const userId = this.userIdByEmail.get(email);
+  async login(input: {
+    emailOrUsername: string;
+    password: string;
+  }): Promise<AuthSession> {
+    const identity = input.emailOrUsername.trim();
+    const normalizedEmail = identity.toLowerCase();
+    const userId =
+      this.userIdByEmail.get(normalizedEmail) ?? this.userIdByUsername.get(identity);
     if (!userId) {
       throw new AuthError("INVALID_CREDENTIALS", "invalid credentials");
     }

@@ -12,7 +12,7 @@ const registerSchema = z.object({
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  emailOrUsername: z.string().min(1),
   password: z.string().min(1),
 });
 
@@ -28,7 +28,7 @@ export function createAuthRouter(config: AuthConfig): express.Router {
     try {
       const body = registerSchema.parse(req.body);
       const result = await service.register(body);
-      res.status(201).json(result);
+      res.status(200).json(result);
     } catch (error) {
       respondWithError(res, error);
     }
@@ -68,7 +68,7 @@ export function createAuthRouter(config: AuthConfig): express.Router {
     try {
       const body = refreshSchema.parse(req.body);
       service.logout(body.refreshToken);
-      res.status(204).send();
+      res.status(200).json({ ok: true });
     } catch (error) {
       respondWithError(res, error);
     }

@@ -83,7 +83,7 @@ test("register/login/me/refresh/logout lifecycle rotates refresh tokens", async 
     password: "SuperSecure!123",
   });
 
-  assert.equal(registerResponse.status, 201);
+  assert.equal(registerResponse.status, 200);
   assert.equal(typeof registerResponse.body.accessToken, "string");
   assert.equal(typeof registerResponse.body.refreshToken, "string");
 
@@ -96,7 +96,7 @@ test("register/login/me/refresh/logout lifecycle rotates refresh tokens", async 
   );
 
   const loginResponse = await post("/auth/login", {
-    email: "integration@example.com",
+    emailOrUsername: "integration_user",
     password: "SuperSecure!123",
   });
 
@@ -132,7 +132,8 @@ test("register/login/me/refresh/logout lifecycle rotates refresh tokens", async 
   const logoutResponse = await post("/auth/logout", {
     refreshToken: rotatedRefreshToken,
   });
-  assert.equal(logoutResponse.status, 204);
+  assert.equal(logoutResponse.status, 200);
+  assert.deepEqual(logoutResponse.body, { ok: true });
 
   const refreshAfterLogout = await post("/auth/refresh", {
     refreshToken: rotatedRefreshToken,
