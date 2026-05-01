@@ -19,5 +19,5 @@ app.get("/health", (_req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`cmc-auth listening on port ${port}`);
+  console.log(`cmc-auth listening on ${port}`);
 });
