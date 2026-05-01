@@ -3,6 +3,9 @@ import { LauncherAppInfo, UpdateEventPayload } from "../shared/ipc";
 
 type LauncherApi = {
   getAppInfo: () => Promise<LauncherAppInfo>;
+  selectMinecraftExe: () => Promise<string>;
+  setMinecraftExe: (value: string) => Promise<void>;
+  launchMinecraft: () => Promise<{ ok: boolean; message: string }>;
   checkForUpdates: () => Promise<void>;
   installUpdate: () => Promise<void>;
   onUpdateEvent: (handler: (payload: UpdateEventPayload) => void) => () => void;
@@ -42,11 +45,18 @@ export function App(): JSX.Element {
     message: "Launcher initializing..."
   });
   const [busy, setBusy] = useState(false);
+  const [launching, setLaunching] = useState(false);
+  const [minecraftExePath, setMinecraftExePath] = useState("");
+  const [launchStatus, setLaunchStatus] = useState("");
 
   useEffect(() => {
     window.launcherApi.getAppInfo().then(setAppInfo).catch(() => {
       setEvent({ type: "error", message: "Failed to read app info." });
     });
+    window.launcherApi
+      .getAppInfo()
+      .then((info) => setMinecraftExePath(info.minecraftExePath ?? ""))
+      .catch(() => undefined);
 
     const unsubscribe = window.launcherApi.onUpdateEvent((payload) => {
       setBusy(payload.type === "checking" || payload.type === "progress");
@@ -130,6 +140,75 @@ export function App(): JSX.Element {
             Restart and install update
           </button>
         </div>
+      </section>
+
+      <section
+        style={{
+          marginTop: 16,
+          padding: 14,
+          borderRadius: 10,
+          background: "rgba(255,255,255,0.06)"
+        }}
+      >
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Minecraft</h2>
+        <p style={{ marginBottom: 8 }}>
+          Set your Minecraft path (`.exe`, `.jar`, or folder) and launch from here.
+        </p>
+        <input
+          value={minecraftExePath}
+          onChange={(e) => setMinecraftExePath(e.target.value)}
+          placeholder="C:\\path\\to\\Minecraft.exe or C:\\path\\to\\beta mc"
+          style={{
+            width: "100%",
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.25)",
+            background: "rgba(0,0,0,0.25)",
+            color: "#eef2ff",
+            padding: "10px 12px",
+            boxSizing: "border-box",
+            marginBottom: 10
+          }}
+        />
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button
+            style={{ ...buttonStyle, background: "#5f6bff", color: "#fff" }}
+            onClick={async () => {
+              const selected = await window.launcherApi.selectMinecraftExe();
+              if (selected) {
+                setMinecraftExePath(selected);
+                setLaunchStatus("Minecraft path selected.");
+              }
+            }}
+          >
+            Browse EXE
+          </button>
+          <button
+            style={{ ...buttonStyle, background: "#8b8fa8", color: "#fff" }}
+            onClick={async () => {
+              await window.launcherApi.setMinecraftExe(minecraftExePath);
+              setLaunchStatus("Minecraft path saved.");
+            }}
+          >
+            Save Path
+          </button>
+          <button
+            style={{ ...buttonStyle, background: "#4edca8", color: "#0d1b18" }}
+            disabled={launching}
+            onClick={async () => {
+              setLaunching(true);
+              try {
+                await window.launcherApi.setMinecraftExe(minecraftExePath);
+                const result = await window.launcherApi.launchMinecraft();
+                setLaunchStatus(result.message);
+              } finally {
+                setLaunching(false);
+              }
+            }}
+          >
+            Launch Minecraft
+          </button>
+        </div>
+        {launchStatus ? <p style={{ marginTop: 10 }}>{launchStatus}</p> : null}
       </section>
     </main>
   );
