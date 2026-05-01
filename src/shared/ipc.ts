@@ -32,9 +32,9 @@ export interface LauncherAppInfo {
   version: string;
   updateChannel: string;
   minecraftExePath: string;
-  isLoggedIn?: boolean;
-  cmcUsername?: string;
-  cmcUuid?: string;
+  isLoggedIn: boolean;
+  cmcUsername: string;
+  cmcUuid: string;
 }
 
 export interface UpdateEventPayload {

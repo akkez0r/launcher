@@ -1,6 +1,8 @@
 export interface AuthUser {
+  id: string;
   username: string;
-  uuid: string;
+  cmcUuid: string;
+  createdAt?: string;
 }
 
 export interface AuthRegisterRequest {
@@ -10,12 +12,12 @@ export interface AuthRegisterRequest {
 }
 
 export interface AuthLoginRequest {
-  username: string;
+  emailOrUsername: string;
   password: string;
 }
 
-export interface AuthResponse {
-  ok: boolean;
-  message: string;
-  user?: AuthUser;
+export interface AuthSessionResponse {
+  user: AuthUser;
+  accessToken: string;
+  refreshToken: string;
 }
