@@ -1,39 +1,32 @@
 import jwt from "jsonwebtoken";
 
-export type AccessTokenPayload = {
-  userId: string;
-  email: string;
+export type AccessClaims = {
+  sub: string;
+  username: string;
+  cmcUuid: string;
 };
 
 const ACCESS_TOKEN_TTL = process.env.CMC_ACCESS_TOKEN_TTL ?? "15m";
 
-function getJwtSecret(): string {
-  const jwtSecret = process.env.CMC_JWT_SECRET;
-
-  if (!jwtSecret) {
-    throw new Error("CMC_JWT_SECRET is required to sign and verify tokens");
-  }
-
-  return jwtSecret;
+export function signAccessToken(claims: AccessClaims, secret: string): string {
+  return jwt.sign(claims, secret, { expiresIn: ACCESS_TOKEN_TTL });
 }
 
-export function signAccessToken(payload: AccessTokenPayload): string {
-  return jwt.sign(payload, getJwtSecret(), { expiresIn: ACCESS_TOKEN_TTL });
-}
-
-export function verifyAccessToken(token: string): AccessTokenPayload {
-  const decoded = jwt.verify(token, getJwtSecret());
+export function verifyAccessToken(token: string, secret: string): AccessClaims {
+  const decoded = jwt.verify(token, secret);
 
   if (
     typeof decoded === "string" ||
-    typeof decoded.userId !== "string" ||
-    typeof decoded.email !== "string"
+    typeof decoded.sub !== "string" ||
+    typeof decoded.username !== "string" ||
+    typeof decoded.cmcUuid !== "string"
   ) {
-    throw new Error("Access token payload is invalid");
+    throw new Error("Access token claims are invalid");
   }
 
   return {
-    userId: decoded.userId,
-    email: decoded.email,
+    sub: decoded.sub,
+    username: decoded.username,
+    cmcUuid: decoded.cmcUuid,
   };
 }

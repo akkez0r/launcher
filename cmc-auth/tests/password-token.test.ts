@@ -4,8 +4,6 @@ import assert from "node:assert/strict";
 import { hashPassword, verifyPassword } from "../src/security/password";
 import { signAccessToken, verifyAccessToken } from "../src/security/tokens";
 
-process.env.CMC_JWT_SECRET = "test-secret";
-
 test("hashPassword returns a hash distinct from plain text", async () => {
   const plain = "S3curePass!42";
   const hash = await hashPassword(plain);
@@ -31,10 +29,17 @@ test("verifyPassword returns false for non-matching password", async () => {
   assert.equal(isMatch, false);
 });
 
-test("token roundtrip signs and verifies payload", () => {
-  const token = signAccessToken({ userId: "user-123", email: "u@example.com" });
-  const payload = verifyAccessToken(token);
+test("token roundtrip signs and verifies access claims", () => {
+  const claims = {
+    sub: "user-123",
+    username: "test_user",
+    cmcUuid: "cmc-uuid-123",
+  };
+  const secret = "test-secret";
+  const token = signAccessToken(claims, secret);
+  const payload = verifyAccessToken(token, secret);
 
-  assert.equal(payload.userId, "user-123");
-  assert.equal(payload.email, "u@example.com");
+  assert.equal(payload.sub, "user-123");
+  assert.equal(payload.username, "test_user");
+  assert.equal(payload.cmcUuid, "cmc-uuid-123");
 });
