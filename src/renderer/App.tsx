@@ -152,12 +152,12 @@ export function App(): JSX.Element {
       >
         <h2 style={{ marginTop: 0, fontSize: 18 }}>Minecraft</h2>
         <p style={{ marginBottom: 8 }}>
-          Set your Minecraft path (`.exe`, `.jar`, or folder) and launch from here.
+          Source folder is preferred by default. You can also use an `.exe` or `.jar`.
         </p>
         <input
           value={minecraftExePath}
           onChange={(e) => setMinecraftExePath(e.target.value)}
-          placeholder="C:\\path\\to\\Minecraft.exe or C:\\path\\to\\beta mc"
+          placeholder="C:\\path\\to\\minecraft (source folder) or C:\\path\\to\\Minecraft.exe"
           style={{
             width: "100%",
             borderRadius: 8,
@@ -180,7 +180,7 @@ export function App(): JSX.Element {
               }
             }}
           >
-            Browse EXE
+            Browse Path
           </button>
           <button
             style={{ ...buttonStyle, background: "#8b8fa8", color: "#fff" }}

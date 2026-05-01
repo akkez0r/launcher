@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "node:path";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import {
   IPC_CHANNELS,
@@ -25,6 +25,8 @@ const store = new Store<LauncherStore>({
 });
 
 let mainWindow: BrowserWindow | null = null;
+const DEFAULT_PROGRAM_ARGS =
+  "--username Player --uuid - --session - --version 1.5.2 --gameDir . --assetsDir .\\assets --assetIndex 1.4 --accessToken - --userProperties {} --userType legacy --versionType snapshot --skinProxy pre-1.8";
 
 type LaunchConfig = {
   command: string;
@@ -116,7 +118,7 @@ function wireIpc(): void {
 
   ipcMain.handle(IPC_CHANNELS.SELECT_MINECRAFT_EXE, async () => {
     const result = await dialog.showOpenDialog({
-      title: "Select Minecraft executable or folder",
+      title: "Select Minecraft source folder, executable, or JAR",
       properties: ["openFile", "openDirectory"],
       filters: [
         { name: "Launch files", extensions: ["exe", "jar"] },
@@ -162,7 +164,7 @@ function wireIpc(): void {
         return {
           ok: false,
           message:
-            "No launch target found. Pick an .exe/.jar or a folder with RetroMCP-Java-GUI.jar."
+            "No launch target found. Pick a source folder, .exe/.jar, or folder with RetroMCP-Java-GUI.jar."
         };
       }
 
@@ -215,6 +217,17 @@ function resolveLaunchConfig(targetPath: string): LaunchConfig | null {
     return null;
   }
 
+  const sourceRoot = resolveSourceRoot(targetPath);
+  if (sourceRoot) {
+    if (!javaCommand) {
+      return null;
+    }
+    const sourceLaunch = resolveSourceProjectLaunch(sourceRoot, javaCommand);
+    if (sourceLaunch) {
+      return sourceLaunch;
+    }
+  }
+
   const retroJar = path.join(targetPath, "RetroMCP-Java-GUI.jar");
   if (existsSync(retroJar)) {
     if (!javaCommand) {
@@ -245,6 +258,10 @@ function isJavaLaunchTarget(targetPath: string): boolean {
     return false;
   }
 
+  if (resolveSourceRoot(targetPath)) {
+    return true;
+  }
+
   return existsSync(path.join(targetPath, "RetroMCP-Java-GUI.jar"));
 }
 
@@ -272,7 +289,75 @@ function resolveJavaCommand(): string | null {
   return null;
 }
 
+function resolveSourceRoot(targetPath: string): string | null {
+  const directLaunch = path.join(targetPath, "Client.launch");
+  if (existsSync(directLaunch)) {
+    return targetPath;
+  }
+
+  const nested = path.join(targetPath, "minecraft");
+  if (existsSync(path.join(nested, "Client.launch"))) {
+    return nested;
+  }
+
+  return null;
+}
+
+function resolveSourceProjectLaunch(
+  sourceRoot: string,
+  javaCommand: string
+): LaunchConfig | null {
+  const launchFile = path.join(sourceRoot, "Client.launch");
+  const gameDir = path.join(sourceRoot, "game");
+  const binDir = path.join(sourceRoot, "bin");
+  if (!existsSync(launchFile) || !existsSync(gameDir) || !existsSync(binDir)) {
+    return null;
+  }
+
+  const launchArgs = extractProgramArgs(launchFile) ?? DEFAULT_PROGRAM_ARGS;
+  const classpath = [
+    binDir,
+    path.join(sourceRoot, "jars", "*"),
+    path.join(sourceRoot, "libraries", "*")
+  ].join(";");
+
+  return {
+    command: javaCommand,
+    args: [
+      "-cp",
+      classpath,
+      "org.mcphackers.launchwrapper.Launch",
+      ...tokenizeArgs(launchArgs)
+    ],
+    cwd: gameDir
+  };
+}
+
+function extractProgramArgs(launchFile: string): string | null {
+  try {
+    const xml = readFileSync(launchFile, "utf8");
+    const match = xml.match(
+      /key="org\.eclipse\.jdt\.launching\.PROGRAM_ARGUMENTS"\s+value="([^"]*)"/
+    );
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function tokenizeArgs(argsLine: string): string[] {
+  const matches = argsLine.match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
+  return matches.map((item) => item.replace(/^"|"$/g, ""));
+}
+
 app.whenReady().then(async () => {
+  if (!store.get("minecraftExePath")) {
+    const defaultPath = detectDefaultMinecraftPath();
+    if (defaultPath) {
+      store.set("minecraftExePath", defaultPath);
+    }
+  }
+
   createWindow();
   wireUpdater();
   wireIpc();
@@ -286,6 +371,24 @@ app.whenReady().then(async () => {
     sendUpdateEvent({ type: "error", message });
   }
 });
+
+function detectDefaultMinecraftPath(): string {
+  const bases = [
+    process.cwd(),
+    path.resolve(process.cwd(), ".."),
+    app.getAppPath(),
+    path.resolve(app.getAppPath(), "..")
+  ];
+
+  for (const base of bases) {
+    const sourceRoot = resolveSourceRoot(base);
+    if (sourceRoot) {
+      return sourceRoot;
+    }
+  }
+
+  return "";
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
