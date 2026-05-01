@@ -150,8 +150,32 @@ function wireIpc(): void {
     return {
       version: app.getVersion(),
       updateChannel: store.get("updateChannel"),
-      minecraftExePath: store.get("minecraftExePath")
+      minecraftExePath: store.get("minecraftExePath"),
+      isLoggedIn: false,
+      cmcUsername: "",
+      cmcUuid: ""
     };
+  });
+
+  const authNotImplementedResponse = {
+    ok: false,
+    message: "Authentication IPC is not implemented yet."
+  };
+
+  ipcMain.handle(IPC_CHANNELS.AUTH_REGISTER, async () => {
+    return authNotImplementedResponse;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AUTH_LOGIN, async () => {
+    return authNotImplementedResponse;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AUTH_LOGOUT, async () => {
+    return authNotImplementedResponse;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AUTH_ME, async () => {
+    return authNotImplementedResponse;
   });
 
   ipcMain.handle(IPC_CHANNELS.SELECT_MINECRAFT_EXE, async () => {
