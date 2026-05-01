@@ -22,16 +22,23 @@ export function createApp(config: AppConfig = {}): express.Express {
       .filter(Boolean),
   );
   const accessTokenSecret =
-    config.auth?.accessTokenSecret ??
-    process.env.CMC_ACCESS_TOKEN_SECRET ??
-    "dev-access-token-secret";
+    config.auth?.accessTokenSecret ?? process.env.CMC_ACCESS_TOKEN_SECRET;
   const refreshTokenSecret =
-    config.auth?.refreshTokenSecret ??
-    process.env.CMC_REFRESH_TOKEN_SECRET ??
-    "dev-refresh-token-secret";
-  const refreshTokenTtlMs =
-    config.auth?.refreshTokenTtlMs ??
-    Number(process.env.CMC_REFRESH_TOKEN_TTL_MS ?? 1000 * 60 * 60 * 24 * 7);
+    config.auth?.refreshTokenSecret ?? process.env.CMC_REFRESH_TOKEN_SECRET;
+  const refreshTokenTtlMsInput =
+    config.auth?.refreshTokenTtlMs ?? process.env.CMC_REFRESH_TOKEN_TTL_MS;
+  const refreshTokenTtlMs = parseRefreshTokenTtlMs(refreshTokenTtlMsInput);
+
+  if (!accessTokenSecret) {
+    throw new Error(
+      "CMC_ACCESS_TOKEN_SECRET is required to initialize auth routes",
+    );
+  }
+  if (!refreshTokenSecret) {
+    throw new Error(
+      "CMC_REFRESH_TOKEN_SECRET is required to initialize auth routes",
+    );
+  }
 
   app.use(
     cors({
@@ -70,4 +77,19 @@ if (require.main === module) {
   app.listen(port, () => {
     console.log(`cmc-auth listening on ${port}`);
   });
+}
+
+function parseRefreshTokenTtlMs(value: number | string | undefined): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error("CMC_REFRESH_TOKEN_TTL_MS must be a positive integer");
+  }
+
+  return parsed;
 }

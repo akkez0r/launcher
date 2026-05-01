@@ -6,7 +6,9 @@ export type AccessClaims = {
   cmcUuid: string;
 };
 
-const ACCESS_TOKEN_TTL = process.env.CMC_ACCESS_TOKEN_TTL ?? "15m";
+const ACCESS_TOKEN_TTL_SECONDS = parseAccessTokenTtlSeconds(
+  process.env.CMC_ACCESS_TOKEN_TTL,
+);
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,32}$/;
@@ -29,7 +31,7 @@ function isValidAccessClaims(value: unknown): value is AccessClaims {
 }
 
 export function signAccessToken(claims: AccessClaims, secret: string): string {
-  return jwt.sign(claims, secret, { expiresIn: ACCESS_TOKEN_TTL });
+  return jwt.sign(claims, secret, { expiresIn: ACCESS_TOKEN_TTL_SECONDS });
 }
 
 export function verifyAccessToken(token: string, secret: string): AccessClaims {
@@ -44,4 +46,17 @@ export function verifyAccessToken(token: string, secret: string): AccessClaims {
     username: decoded.username,
     cmcUuid: decoded.cmcUuid,
   };
+}
+
+function parseAccessTokenTtlSeconds(value: string | undefined): number {
+  if (!value) {
+    return 15 * 60;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error("CMC_ACCESS_TOKEN_TTL must be a positive integer");
+  }
+
+  return parsed;
 }
