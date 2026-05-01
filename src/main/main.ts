@@ -334,12 +334,17 @@ function resolveSourceProjectLaunch(
   }
 
   const launchArgs = extractProgramArgs(launchFile) ?? DEFAULT_PROGRAM_ARGS;
+  const vmArgsLine = extractVmArgs(launchFile) ?? "";
+  const vmArgs = tokenizeArgs(vmArgsLine);
+  const nativeVmArgs = resolveNativeVmArgs(sourceRoot, vmArgs);
   const runtimeClasspath = buildRuntimeClasspath(sourceRoot);
   const classpath = runtimeClasspath.length > 0 ? runtimeClasspath : binDir;
 
   return {
     command: javaCommand,
     args: [
+      ...vmArgs,
+      ...nativeVmArgs,
       "-cp",
       classpath,
       "org.mcphackers.launchwrapper.Launch",
@@ -355,6 +360,16 @@ function extractProgramArgs(launchFile: string): string | null {
     const match = xml.match(
       /key="org\.eclipse\.jdt\.launching\.PROGRAM_ARGUMENTS"\s+value="([^"]*)"/
     );
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function extractVmArgs(launchFile: string): string | null {
+  try {
+    const xml = readFileSync(launchFile, "utf8");
+    const match = xml.match(/key="org\.eclipse\.jdt\.launching\.VM_ARGUMENTS"\s+value="([^"]*)"/);
     return match?.[1] ?? null;
   } catch {
     return null;
@@ -507,6 +522,63 @@ function normalizePathForJava(filePath: string): string {
   return filePath.replace(/\\/g, "/");
 }
 
+function resolveNativeVmArgs(sourceRoot: string, existingVmArgs: string[]): string[] {
+  const hasNativePath = existingVmArgs.some((arg) =>
+    /^-D(?:java\.library\.path|org\.lwjgl\.librarypath|net\.java\.games\.input\.librarypath)=/.test(
+      arg
+    )
+  );
+  if (hasNativePath) {
+    return [];
+  }
+
+  const nativesDir = resolveNativesDir(sourceRoot);
+  if (!nativesDir) {
+    return [];
+  }
+
+  const nativePath = normalizePathForJava(nativesDir);
+  return [
+    `-Djava.library.path=${nativePath}`,
+    `-Dorg.lwjgl.librarypath=${nativePath}`,
+    `-Dnet.java.games.input.librarypath=${nativePath}`
+  ];
+}
+
+function resolveNativesDir(sourceRoot: string): string | null {
+  const candidates: string[] = [];
+  let current = sourceRoot;
+  while (true) {
+    candidates.push(
+      path.join(current, "bin", "natives"),
+      path.join(current, "natives"),
+      path.join(current, "game", "bin", "natives"),
+      path.join(current, "game", "natives")
+    );
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+
+  for (const dir of candidates) {
+    if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+      continue;
+    }
+
+    const files = readdirSync(dir).map((name) => name.toLowerCase());
+    const hasLwjglNative = files.some((name) =>
+      ["lwjgl.dll", "lwjgl64.dll", "openal32.dll", "openal64.dll"].includes(name)
+    );
+    if (hasLwjglNative) {
+      return dir;
+    }
+  }
+
+  return null;
+}
+
 function resolveDependencyRoots(sourceRoot: string): string[] {
   const candidates: string[] = [];
   let current = sourceRoot;
@@ -631,8 +703,15 @@ function readLaunchLogSnippet(logPath: string): string {
     }
 
     const lines = content.split(/\r?\n/).filter((line) => line.trim().length > 0);
-    const tail = lines.slice(-3).join(" | ");
-    return `Log: ${tail}`;
+    const interesting = lines.filter((line) =>
+      /(Exception|Error|Caused by|UnsatisfiedLinkError)/i.test(line)
+    );
+    if (interesting.length > 0) {
+      return `Log: ${interesting.slice(-3).join(" | ")}`;
+    }
+
+    const tail = lines.slice(-8).join(" | ");
+    return `Log tail: ${tail}`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown log read error";
     return `Failed to read launch log: ${message}`;
