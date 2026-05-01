@@ -1,8 +1,19 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { HostStatus, LauncherAppInfo, UpdateEventPayload } from "../shared/ipc";
 
 type LauncherApi = {
   getAppInfo: () => Promise<LauncherAppInfo>;
+  register: (payload: {
+    username: string;
+    email: string;
+    password: string;
+  }) => Promise<{ user: { username: string; cmcUuid: string } }>;
+  login: (payload: {
+    emailOrUsername: string;
+    password: string;
+  }) => Promise<{ user: { username: string; cmcUuid: string } }>;
+  logout: () => Promise<{ ok: boolean }>;
+  me: () => Promise<{ user: { username: string; cmcUuid: string } }>;
   selectMinecraftExe: () => Promise<string>;
   setMinecraftExe: (value: string) => Promise<void>;
   downloadMinecraftFromGithub: () => Promise<{ ok: boolean; message: string; path?: string }>;
@@ -111,11 +122,14 @@ const changelogEntries = [
 ];
 
 export function App(): JSX.Element {
-  const [activeTab, setActiveTab] = useState<"play" | "host">("play");
+  const [activeTab, setActiveTab] = useState<"play" | "host" | "account">("play");
   const [appInfo, setAppInfo] = useState<LauncherAppInfo>({
     version: "unknown",
     updateChannel: "latest",
-    minecraftExePath: ""
+    minecraftExePath: "",
+    isLoggedIn: false,
+    cmcUsername: "",
+    cmcUuid: ""
   });
   const [event, setEvent] = useState<UpdateEventPayload>({
     type: "idle",
@@ -126,6 +140,13 @@ export function App(): JSX.Element {
   const [downloadingSource, setDownloadingSource] = useState(false);
   const [minecraftExePath, setMinecraftExePath] = useState("");
   const [launchStatus, setLaunchStatus] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authStatus, setAuthStatus] = useState("");
+  const [registerUsername, setRegisterUsername] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [loginEmailOrUsername, setLoginEmailOrUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [hostBusy, setHostBusy] = useState(false);
   const [hostMessage, setHostMessage] = useState("");
   const [hostStatus, setHostStatus] = useState<HostStatus>({
@@ -137,14 +158,30 @@ export function App(): JSX.Element {
     tunnelLogTail: []
   });
 
+  const refreshAppInfo = useCallback(async () => {
+    const info = await window.launcherApi.getAppInfo();
+    let nextInfo = info;
+    if (info.isLoggedIn) {
+      try {
+        const me = await window.launcherApi.me();
+        nextInfo = {
+          ...info,
+          cmcUsername: me.user.username ?? info.cmcUsername,
+          cmcUuid: me.user.cmcUuid ?? info.cmcUuid
+        };
+      } catch {
+        nextInfo = info;
+      }
+    }
+    setAppInfo(nextInfo);
+    setMinecraftExePath(nextInfo.minecraftExePath ?? "");
+    return nextInfo;
+  }, []);
+
   useEffect(() => {
-    window.launcherApi.getAppInfo().then(setAppInfo).catch(() => {
+    refreshAppInfo().catch(() => {
       setEvent({ type: "error", message: "Failed to read app info." });
     });
-    window.launcherApi
-      .getAppInfo()
-      .then((info) => setMinecraftExePath(info.minecraftExePath ?? ""))
-      .catch(() => undefined);
 
     const unsubscribe = window.launcherApi.onUpdateEvent((payload) => {
       setBusy(payload.type === "checking" || payload.type === "progress");
@@ -164,7 +201,7 @@ export function App(): JSX.Element {
       window.clearInterval(timer);
       unsubscribe();
     };
-  }, []);
+  }, [refreshAppInfo]);
 
   const percentLabel = useMemo(() => {
     if (typeof event.percent !== "number") {
@@ -172,6 +209,9 @@ export function App(): JSX.Element {
     }
     return `${Math.max(0, Math.min(100, event.percent)).toFixed(1)}%`;
   }, [event.percent]);
+
+  const getErrorMessage = (error: unknown): string =>
+    error instanceof Error ? error.message : "Unknown authentication error.";
 
   return (
     <main style={wrapperStyle}>
@@ -234,6 +274,17 @@ export function App(): JSX.Element {
           onClick={() => setActiveTab("host")}
         >
           Host
+        </button>
+        <button
+          className="a-btn"
+          style={{
+            ...buttonStyle,
+            background: activeTab === "account" ? "#4f8cff" : "#313a57",
+            color: "#fff"
+          }}
+          onClick={() => setActiveTab("account")}
+        >
+          Account
         </button>
       </div>
 
@@ -371,6 +422,10 @@ export function App(): JSX.Element {
             style={{ ...buttonStyle, background: "#4edca8", color: "#0d1b18" }}
             disabled={launching || downloadingSource}
             onClick={async () => {
+              if (!appInfo.isLoggedIn) {
+                setLaunchStatus("Launch blocked: please log in from the Account tab first.");
+                return;
+              }
               setLaunching(true);
               try {
                 await window.launcherApi.setMinecraftExe(minecraftExePath);
@@ -397,7 +452,7 @@ export function App(): JSX.Element {
         {launchStatus ? <p style={{ marginTop: 10, opacity: 0.92 }}>{launchStatus}</p> : null}
       </section>
       </>
-      ) : (
+      ) : activeTab === "host" ? (
       <section
         style={{
           marginTop: 8,
@@ -522,6 +577,176 @@ export function App(): JSX.Element {
             ))}
           </div>
         </div>
+      </section>
+      ) : (
+      <section
+        style={{
+          marginTop: 8,
+          padding: 14,
+          borderRadius: 12,
+          background: "rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.08)"
+        }}
+      >
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>CMC Account</h2>
+        {!appInfo.isLoggedIn ? (
+          <>
+            <p style={{ marginBottom: 12, opacity: 0.9 }}>
+              Log in or create a CMC account to enable Minecraft launch.
+            </p>
+            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 10,
+                  background: "rgba(0,0,0,0.22)",
+                  border: "1px solid rgba(255,255,255,0.08)"
+                }}
+              >
+                <h3 style={{ marginTop: 0, marginBottom: 10, fontSize: 15 }}>Register</h3>
+                <input
+                  value={registerUsername}
+                  onChange={(e) => setRegisterUsername(e.target.value)}
+                  placeholder="Username"
+                  style={inputStyle}
+                />
+                <input
+                  value={registerEmail}
+                  onChange={(e) => setRegisterEmail(e.target.value)}
+                  placeholder="Email"
+                  style={inputStyle}
+                />
+                <input
+                  type="password"
+                  value={registerPassword}
+                  onChange={(e) => setRegisterPassword(e.target.value)}
+                  placeholder="Password"
+                  style={inputStyle}
+                />
+                <button
+                  className="a-btn"
+                  style={{ ...buttonStyle, background: "#5f6bff", color: "#fff", width: "100%" }}
+                  disabled={
+                    authBusy ||
+                    !registerUsername.trim() ||
+                    !registerEmail.trim() ||
+                    !registerPassword
+                  }
+                  onClick={async () => {
+                    setAuthBusy(true);
+                    setAuthStatus("");
+                    try {
+                      const result = await window.launcherApi.register({
+                        username: registerUsername.trim(),
+                        email: registerEmail.trim(),
+                        password: registerPassword
+                      });
+                      await refreshAppInfo();
+                      setRegisterPassword("");
+                      setLoginPassword("");
+                      setAuthStatus(`Registered and logged in as ${result.user.username}.`);
+                      setLaunchStatus("Account connected. You can now launch Minecraft.");
+                    } catch (error) {
+                      setAuthStatus(getErrorMessage(error));
+                    } finally {
+                      setAuthBusy(false);
+                    }
+                  }}
+                >
+                  {authBusy ? "Please wait..." : "Create account"}
+                </button>
+              </div>
+
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 10,
+                  background: "rgba(0,0,0,0.22)",
+                  border: "1px solid rgba(255,255,255,0.08)"
+                }}
+              >
+                <h3 style={{ marginTop: 0, marginBottom: 10, fontSize: 15 }}>Login</h3>
+                <input
+                  value={loginEmailOrUsername}
+                  onChange={(e) => setLoginEmailOrUsername(e.target.value)}
+                  placeholder="Email or username"
+                  style={inputStyle}
+                />
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="Password"
+                  style={inputStyle}
+                />
+                <button
+                  className="a-btn"
+                  style={{ ...buttonStyle, background: "#4f8cff", color: "#fff", width: "100%" }}
+                  disabled={authBusy || !loginEmailOrUsername.trim() || !loginPassword}
+                  onClick={async () => {
+                    setAuthBusy(true);
+                    setAuthStatus("");
+                    try {
+                      const result = await window.launcherApi.login({
+                        emailOrUsername: loginEmailOrUsername.trim(),
+                        password: loginPassword
+                      });
+                      await refreshAppInfo();
+                      setLoginPassword("");
+                      setRegisterPassword("");
+                      setAuthStatus(`Logged in as ${result.user.username}.`);
+                      setLaunchStatus("Account connected. You can now launch Minecraft.");
+                    } catch (error) {
+                      setAuthStatus(getErrorMessage(error));
+                    } finally {
+                      setAuthBusy(false);
+                    }
+                  }}
+                >
+                  {authBusy ? "Please wait..." : "Login"}
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 10,
+              background: "rgba(0,0,0,0.22)",
+              border: "1px solid rgba(255,255,255,0.08)"
+            }}
+          >
+            <p style={{ margin: "0 0 8px", opacity: 0.9 }}>
+              Signed in as <strong>{appInfo.cmcUsername || "unknown user"}</strong>
+            </p>
+            <p style={{ margin: "0 0 12px", opacity: 0.9 }}>
+              CMC UUID: <strong>{appInfo.cmcUuid || "unknown"}</strong>
+            </p>
+            <button
+              className="a-btn"
+              style={{ ...buttonStyle, background: "#8b8fa8", color: "#fff" }}
+              disabled={authBusy}
+              onClick={async () => {
+                setAuthBusy(true);
+                setAuthStatus("");
+                try {
+                  await window.launcherApi.logout();
+                  await refreshAppInfo();
+                  setAuthStatus("Logged out successfully.");
+                  setLaunchStatus("Launch blocked until you log in again.");
+                } catch (error) {
+                  setAuthStatus(getErrorMessage(error));
+                } finally {
+                  setAuthBusy(false);
+                }
+              }}
+            >
+              {authBusy ? "Please wait..." : "Logout"}
+            </button>
+          </div>
+        )}
+        {authStatus ? <p style={{ marginTop: 10, opacity: 0.92 }}>{authStatus}</p> : null}
       </section>
       )}
       <section
