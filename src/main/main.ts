@@ -11,7 +11,7 @@ import {
   unlinkSync,
   writeFileSync
 } from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   IPC_CHANNELS,
   LauncherAppInfo,
@@ -194,8 +194,16 @@ function wireIpc(): void {
       const child = spawn(launchConfig.command, launchConfig.args, {
         cwd: launchConfig.cwd,
         detached: true,
-        stdio: "ignore"
+        stdio: ["ignore", "ignore", "ignore"]
       });
+      const launchProbe = await waitForProcessStart(child, 1600);
+      if (!launchProbe.ok) {
+        return {
+          ok: false,
+          message: `Minecraft process exited immediately (${launchProbe.reason}).`
+        };
+      }
+
       child.unref();
       const message = launchNote ? `${launchNote} Minecraft launched.` : "Minecraft launched.";
       return { ok: true, message };
@@ -564,6 +572,41 @@ function firstLine(text: string): string {
 function quoteArgfileValue(value: string): string {
   const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return `"${escaped}"`;
+}
+
+function waitForProcessStart(
+  child: ChildProcess,
+  timeoutMs: number
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result: { ok: true } | { ok: false; reason: string }) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      done({ ok: true });
+    }, timeoutMs);
+
+    child.once("error", (error) => {
+      done({ ok: false, reason: error.message });
+    });
+
+    child.once("exit", (code, signal) => {
+      if (signal) {
+        done({ ok: false, reason: `signal ${signal}` });
+        return;
+      }
+
+      const exitCode = typeof code === "number" ? String(code) : "unknown";
+      done({ ok: false, reason: `exit code ${exitCode}` });
+    });
+  });
 }
 
 app.whenReady().then(async () => {
