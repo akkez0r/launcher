@@ -51,6 +51,11 @@ await build({
 });
 
 cpSync("src/renderer/index.html", path.join(rendererDir, "index.html"));
+if (existsSync("src/renderer/assets")) {
+  cpSync("src/renderer/assets", path.join(rendererDir, "assets"), {
+    recursive: true
+  });
+}
 
 if (watchMode) {
   console.log("Watching for changes...");

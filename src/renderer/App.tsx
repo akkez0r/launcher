@@ -75,7 +75,14 @@ export function App(): JSX.Element {
 
   return (
     <main style={cardStyle}>
-      <h1 style={{ marginTop: 0 }}>Akkez Launcher</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <img
+          src="./assets/logo.svg"
+          alt="Akkez Launcher logo"
+          style={{ width: 44, height: 44, borderRadius: 8 }}
+        />
+        <h1 style={{ margin: 0 }}>Akkez Launcher</h1>
+      </div>
       <p style={{ opacity: 0.9 }}>
         Version <strong>{appInfo.version}</strong> · Channel{" "}
         <strong>{appInfo.updateChannel}</strong>
