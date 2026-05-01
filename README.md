@@ -39,6 +39,7 @@ Electron-based Windows launcher with GitHub Releases auto-updates.
 - [ ] Open launcher and register a new account from the CMC auth UI.
 - [ ] Log out, then log in with the same account and confirm login succeeds.
 - [ ] Close and reopen the launcher; verify the session is restored automatically.
+- [ ] Verify backend identity injection is applied on launch: `--username` and `--uuid` use values from `/auth/me` (CMC profile).
 - [ ] Start Minecraft from the launcher and confirm launch still succeeds.
 
 ## Manual Run Checklist (Backend + Launcher)
