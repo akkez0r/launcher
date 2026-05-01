@@ -971,9 +971,22 @@ async function startHostServer(): Promise<{ ok: boolean; message: string }> {
     return { ok: false, message: "Set/download Minecraft package first." };
   }
 
-  const serverRoot = resolveServerSourceRoot();
+  let serverRoot = resolveServerSourceRoot();
   if (!serverRoot) {
-    return { ok: false, message: "Could not find minecraft_server with Server.launch." };
+    const refresh = await downloadMinecraftFromGithub();
+    if (!refresh.ok) {
+      return {
+        ok: false,
+        message: `Could not find minecraft_server with Server.launch and package refresh failed: ${refresh.message}`
+      };
+    }
+    serverRoot = resolveServerSourceRoot();
+  }
+  if (!serverRoot) {
+    return {
+      ok: false,
+      message: "Could not find minecraft_server with Server.launch after refresh."
+    };
   }
 
   const javaCommand = resolveJavaCommand();
@@ -1099,15 +1112,62 @@ function resolveServerSourceRoot(): string | null {
     return null;
   }
 
-  const candidates = [
-    path.join(sourceRoot, "minecraft_server"),
-    path.join(path.dirname(sourceRoot), "minecraft_server"),
-    sourceRoot
+  const searchRoots = [sourceRoot, path.dirname(sourceRoot)];
+  for (const root of searchRoots) {
+    const resolved = findServerLaunchRoot(root);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return null;
+}
+
+function findServerLaunchRoot(root: string): string | null {
+  const directCandidates = [
+    path.join(root, "minecraft_server"),
+    path.join(root, "server"),
+    root
   ];
 
-  for (const candidate of candidates) {
+  for (const candidate of directCandidates) {
     if (existsSync(path.join(candidate, "Server.launch"))) {
       return candidate;
+    }
+  }
+
+  const stack: string[] = [root];
+  let visited = 0;
+  while (stack.length > 0 && visited < 300) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    visited += 1;
+
+    let entries: ReturnType<typeof readdirSync>;
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      // Keep scan focused to likely server project directories.
+      const name = entry.name.toLowerCase();
+      if (!name.includes("server") && !name.includes("minecraft")) {
+        continue;
+      }
+
+      const full = path.join(current, entry.name);
+      if (existsSync(path.join(full, "Server.launch"))) {
+        return full;
+      }
+      stack.push(full);
     }
   }
 
