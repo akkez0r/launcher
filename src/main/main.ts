@@ -390,7 +390,8 @@ function resolveSourceProjectLaunch(
     return null;
   }
 
-  const launchArgs = extractProgramArgs(launchFile) ?? DEFAULT_PROGRAM_ARGS;
+  const launchArgsLine = extractProgramArgs(launchFile) ?? DEFAULT_PROGRAM_ARGS;
+  const launchArgs = ensureFullscreenDefault(tokenizeArgs(launchArgsLine));
   const vmArgsLine = extractVmArgs(launchFile) ?? "";
   const vmArgs = tokenizeArgs(vmArgsLine);
   const sanitizedVmArgs = vmArgs.filter(
@@ -411,7 +412,7 @@ function resolveSourceProjectLaunch(
       "-cp",
       classpath,
       "org.mcphackers.launchwrapper.Launch",
-      ...tokenizeArgs(launchArgs)
+      ...launchArgs
     ],
     cwd: gameDir
   };
@@ -442,6 +443,17 @@ function extractVmArgs(launchFile: string): string | null {
 function tokenizeArgs(argsLine: string): string[] {
   const matches = argsLine.match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
   return matches.map((item) => item.replace(/^"|"$/g, ""));
+}
+
+function ensureFullscreenDefault(args: string[]): string[] {
+  const hasFullscreenFlag = args.some(
+    (arg) => arg === "--fullscreen" || arg === "-fullscreen" || arg === "--windowed"
+  );
+  if (hasFullscreenFlag) {
+    return args;
+  }
+
+  return [...args, "--fullscreen"];
 }
 
 function prepareSourceProjectForLaunch(sourceRoot: string): SourcePrepResult {
