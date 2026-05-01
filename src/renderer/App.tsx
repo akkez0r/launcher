@@ -5,6 +5,8 @@ type LauncherApi = {
   getAppInfo: () => Promise<LauncherAppInfo>;
   selectMinecraftExe: () => Promise<string>;
   setMinecraftExe: (value: string) => Promise<void>;
+  setMinecraftRepoUrl: (value: string) => Promise<void>;
+  downloadMinecraftFromGithub: () => Promise<{ ok: boolean; message: string; path?: string }>;
   launchMinecraft: () => Promise<{ ok: boolean; message: string }>;
   checkForUpdates: () => Promise<void>;
   installUpdate: () => Promise<void>;
@@ -38,7 +40,9 @@ const buttonStyle: React.CSSProperties = {
 export function App(): JSX.Element {
   const [appInfo, setAppInfo] = useState<LauncherAppInfo>({
     version: "unknown",
-    updateChannel: "latest"
+    updateChannel: "latest",
+    minecraftExePath: "",
+    minecraftRepoUrl: ""
   });
   const [event, setEvent] = useState<UpdateEventPayload>({
     type: "idle",
@@ -47,6 +51,7 @@ export function App(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [minecraftExePath, setMinecraftExePath] = useState("");
+  const [minecraftRepoUrl, setMinecraftRepoUrl] = useState("");
   const [launchStatus, setLaunchStatus] = useState("");
 
   useEffect(() => {
@@ -55,7 +60,10 @@ export function App(): JSX.Element {
     });
     window.launcherApi
       .getAppInfo()
-      .then((info) => setMinecraftExePath(info.minecraftExePath ?? ""))
+      .then((info) => {
+        setMinecraftExePath(info.minecraftExePath ?? "");
+        setMinecraftRepoUrl(info.minecraftRepoUrl ?? "");
+      })
       .catch(() => undefined);
 
     const unsubscribe = window.launcherApi.onUpdateEvent((payload) => {
@@ -159,8 +167,23 @@ export function App(): JSX.Element {
       >
         <h2 style={{ marginTop: 0, fontSize: 18 }}>Minecraft</h2>
         <p style={{ marginBottom: 8 }}>
-          Use your Minecraft source folder (with `Client.launch`). Launcher will auto-update from git and compile source before launch.
+          Use your Minecraft source folder (with `Client.launch`) or set a GitHub zip/repo URL to auto-download it.
         </p>
+        <input
+          value={minecraftRepoUrl}
+          onChange={(e) => setMinecraftRepoUrl(e.target.value)}
+          placeholder="https://github.com/owner/repo or https://github.com/owner/repo/archive/refs/heads/main.zip"
+          style={{
+            width: "100%",
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.25)",
+            background: "rgba(0,0,0,0.25)",
+            color: "#eef2ff",
+            padding: "10px 12px",
+            boxSizing: "border-box",
+            marginBottom: 10
+          }}
+        />
         <input
           value={minecraftExePath}
           onChange={(e) => setMinecraftExePath(e.target.value)}
@@ -193,10 +216,30 @@ export function App(): JSX.Element {
             style={{ ...buttonStyle, background: "#8b8fa8", color: "#fff" }}
             onClick={async () => {
               await window.launcherApi.setMinecraftExe(minecraftExePath);
+              await window.launcherApi.setMinecraftRepoUrl(minecraftRepoUrl);
               setLaunchStatus("Minecraft path saved.");
             }}
           >
             Save Path
+          </button>
+          <button
+            style={{ ...buttonStyle, background: "#c9a24d", color: "#1b1300" }}
+            disabled={launching}
+            onClick={async () => {
+              setLaunching(true);
+              try {
+                await window.launcherApi.setMinecraftRepoUrl(minecraftRepoUrl);
+                const result = await window.launcherApi.downloadMinecraftFromGithub();
+                if (result.path) {
+                  setMinecraftExePath(result.path);
+                }
+                setLaunchStatus(result.message);
+              } finally {
+                setLaunching(false);
+              }
+            }}
+          >
+            Download Minecraft
           </button>
           <button
             style={{ ...buttonStyle, background: "#4edca8", color: "#0d1b18" }}
@@ -205,6 +248,7 @@ export function App(): JSX.Element {
               setLaunching(true);
               try {
                 await window.launcherApi.setMinecraftExe(minecraftExePath);
+                await window.launcherApi.setMinecraftRepoUrl(minecraftRepoUrl);
                 const result = await window.launcherApi.launchMinecraft();
                 setLaunchStatus(result.message);
               } finally {

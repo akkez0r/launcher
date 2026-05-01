@@ -5,6 +5,8 @@ Electron-based Windows launcher with GitHub Releases auto-updates.
 ## Minecraft Source Launch
 
 - Set the Minecraft path to your source project folder that contains `Client.launch`.
+- Or set a GitHub repo/zip URL and use **Download Minecraft** in the launcher.
+- If launch path is missing, launcher will try auto-downloading from configured GitHub URL.
 - On launch, the launcher tries to run `git pull --ff-only` in that source folder (if it is a git repo).
 - Then it compiles Java source with `javac` and starts the game via Java.
 - Requirements: `java` and `javac` available on `PATH` (JDK installed).

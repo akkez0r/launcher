@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld("launcherApi", {
     ipcRenderer.invoke(IPC_CHANNELS.SELECT_MINECRAFT_EXE),
   setMinecraftExe: (value: string): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.SET_MINECRAFT_EXE, value),
+  setMinecraftRepoUrl: (value: string): Promise<void> =>
+    ipcRenderer.invoke(IPC_CHANNELS.SET_MINECRAFT_REPO_URL, value),
+  downloadMinecraftFromGithub: (): Promise<{ ok: boolean; message: string; path?: string }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.DOWNLOAD_MINECRAFT_FROM_GITHUB),
   launchMinecraft: (): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_MINECRAFT),
   checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.CHECK_FOR_UPDATES),
