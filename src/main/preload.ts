@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { AuthLoginRequest, AuthRegisterRequest, AuthResponse, AuthUser } from "../shared/auth";
 import {
   HostStatus,
   IPC_CHANNELS,
@@ -29,6 +30,14 @@ contextBridge.exposeInMainWorld("launcherApi", {
     ipcRenderer.invoke(IPC_CHANNELS.HOST_STOP_TUNNEL),
   checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.CHECK_FOR_UPDATES),
   installUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.INSTALL_UPDATE),
+  register: (payload: AuthRegisterRequest): Promise<AuthResponse> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTH_REGISTER, payload),
+  login: (payload: AuthLoginRequest): Promise<AuthResponse> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTH_LOGIN, payload),
+  logout: (): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTH_LOGOUT),
+  me: (): Promise<{ ok: boolean; user?: AuthUser; message?: string }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTH_ME),
   onUpdateEvent: (handler: (payload: UpdateEventPayload) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: UpdateEventPayload) =>
       handler(payload);

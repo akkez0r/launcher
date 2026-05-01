@@ -1,5 +1,9 @@
 export const IPC_CHANNELS = {
   APP_INFO: "launcher:app-info",
+  AUTH_REGISTER: "launcher:auth-register",
+  AUTH_LOGIN: "launcher:auth-login",
+  AUTH_LOGOUT: "launcher:auth-logout",
+  AUTH_ME: "launcher:auth-me",
   SELECT_MINECRAFT_EXE: "launcher:select-minecraft-exe",
   SET_MINECRAFT_EXE: "launcher:set-minecraft-exe",
   DOWNLOAD_MINECRAFT_FROM_GITHUB: "launcher:download-minecraft-from-github",
@@ -28,6 +32,9 @@ export interface LauncherAppInfo {
   version: string;
   updateChannel: string;
   minecraftExePath: string;
+  isLoggedIn?: boolean;
+  cmcUsername?: string;
+  cmcUuid?: string;
 }
 
 export interface UpdateEventPayload {
