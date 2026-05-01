@@ -60,10 +60,7 @@ const LOCKED_MINECRAFT_SOURCE_ZIP_URL =
   "https://github.com/akkez0r/launcher/releases/latest/download/minecraft-source.zip";
 const PLAYIT_DOWNLOAD_URL =
   "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe";
-const CMC_API_BASE_URL = (process.env.CMC_API_BASE_URL?.trim() || "http://127.0.0.1:8787").replace(
-  /\/+$/,
-  ""
-);
+const CMC_API_BASE_URL = resolveCmcApiBaseUrl();
 const CMC_SESSION_FILE_NAME = "cmc-auth-session.bin";
 
 type LaunchConfig = {
@@ -81,6 +78,18 @@ type AuthApiRequestOptions = {
   body?: unknown;
   accessToken?: string;
 };
+
+class AuthApiError extends Error {
+  status: number;
+  errorCode: string | null;
+
+  constructor(message: string, status: number, errorCode: string | null = null) {
+    super(message);
+    this.name = "AuthApiError";
+    this.status = status;
+    this.errorCode = errorCode;
+  }
+}
 
 let hostServerProcess: ChildProcessWithoutNullStreams | null = null;
 let hostTunnelProcess: ChildProcessWithoutNullStreams | null = null;
@@ -367,6 +376,9 @@ function getSessionFilePath(): string {
 }
 
 function saveSession(session: AuthSessionResponse): void {
+  if (!isAuthSessionResponse(session)) {
+    throw new Error("Invalid auth session payload.");
+  }
   if (!safeStorage.isEncryptionAvailable()) {
     throw new Error("Secure storage is not available on this device.");
   }
@@ -411,27 +423,47 @@ function clearStoredSession(): void {
 }
 
 async function authRegister(payload: AuthRegisterRequest): Promise<AuthSessionResponse> {
-  return requestAuthApi<AuthSessionResponse>("POST", "/auth/register", { body: payload });
+  const result = await requestAuthApi<unknown>("POST", "/auth/register", { body: payload });
+  if (!isAuthSessionResponse(result)) {
+    throw new Error("Invalid register response payload.");
+  }
+  return result;
 }
 
 async function authLogin(payload: AuthLoginRequest): Promise<AuthSessionResponse> {
-  return requestAuthApi<AuthSessionResponse>("POST", "/auth/login", { body: payload });
+  const result = await requestAuthApi<unknown>("POST", "/auth/login", { body: payload });
+  if (!isAuthSessionResponse(result)) {
+    throw new Error("Invalid login response payload.");
+  }
+  return result;
 }
 
 async function authRefresh(refreshToken: string): Promise<AuthSessionResponse> {
-  return requestAuthApi<AuthSessionResponse>("POST", "/auth/refresh", {
+  const result = await requestAuthApi<unknown>("POST", "/auth/refresh", {
     body: { refreshToken }
   });
+  if (!isAuthSessionResponse(result)) {
+    throw new Error("Invalid refresh response payload.");
+  }
+  return result;
 }
 
 async function authMe(accessToken: string): Promise<{ user: AuthUser }> {
-  return requestAuthApi<{ user: AuthUser }>("GET", "/auth/me", { accessToken });
+  const result = await requestAuthApi<unknown>("GET", "/auth/me", { accessToken });
+  if (!isAuthMeResponse(result)) {
+    throw new Error("Invalid /auth/me response payload.");
+  }
+  return result;
 }
 
 async function authLogout(refreshToken: string): Promise<{ ok: boolean }> {
-  return requestAuthApi<{ ok: boolean }>("POST", "/auth/logout", {
+  const result = await requestAuthApi<unknown>("POST", "/auth/logout", {
     body: { refreshToken }
   });
+  if (!isAuthLogoutResponse(result)) {
+    throw new Error("Invalid logout response payload.");
+  }
+  return result;
 }
 
 async function requestAuthApi<T>(
@@ -455,8 +487,9 @@ async function requestAuthApi<T>(
   const rawBody = await response.text();
   const parsed = rawBody ? tryParseJson(rawBody) : null;
   if (!response.ok) {
-    const errorMessage = extractApiError(parsed) ?? `Auth request failed (${response.status})`;
-    throw new Error(errorMessage);
+    const errorCode = extractApiError(parsed);
+    const errorMessage = errorCode ?? `Auth request failed (${response.status})`;
+    throw new AuthApiError(errorMessage, response.status, errorCode);
   }
 
   return (parsed ?? {}) as T;
@@ -495,6 +528,24 @@ function isAuthSessionResponse(value: unknown): value is AuthSessionResponse {
   );
 }
 
+function isAuthMeResponse(value: unknown): value is { user: AuthUser } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const response = value as { user?: unknown };
+  return isAuthUser(response.user);
+}
+
+function isAuthLogoutResponse(value: unknown): value is { ok: boolean } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const response = value as { ok?: unknown };
+  return typeof response.ok === "boolean";
+}
+
 function isAuthUser(value: unknown): value is AuthUser {
   if (!value || typeof value !== "object") {
     return false;
@@ -519,18 +570,54 @@ async function ensureValidSession(): Promise<AuthSessionResponse> {
     const session = { ...stored, user: me.user };
     saveSession(session);
     return session;
-  } catch {
+  } catch (error) {
+    if (!isAuthFailureError(error)) {
+      throw new Error("Unable to validate session right now. Try again.");
+    }
+
     try {
       const refreshed = await authRefresh(stored.refreshToken);
       const me = await authMe(refreshed.accessToken);
       const session = { ...refreshed, user: me.user };
       saveSession(session);
       return session;
-    } catch {
-      clearStoredSession();
-      throw new Error("Session expired. Please log in again.");
+    } catch (refreshError) {
+      if (isAuthFailureError(refreshError)) {
+        clearStoredSession();
+        throw new Error("Session expired. Please log in again.");
+      }
+      throw new Error("Unable to refresh session right now. Try again.");
     }
   }
+}
+
+function isAuthFailureError(error: unknown): boolean {
+  return error instanceof AuthApiError && (error.status === 401 || error.status === 403);
+}
+
+function resolveCmcApiBaseUrl(): string {
+  const rawValue = process.env.CMC_API_BASE_URL?.trim() || "http://127.0.0.1:8787";
+  let parsed: URL;
+  try {
+    parsed = new URL(rawValue);
+  } catch {
+    throw new Error("Invalid CMC_API_BASE_URL: expected an absolute http(s) URL.");
+  }
+
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol !== "http:" && protocol !== "https:") {
+    throw new Error("Invalid CMC_API_BASE_URL: only http and https are supported.");
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const isLoopbackHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  if (protocol !== "https:" && !isLoopbackHost) {
+    throw new Error(
+      "Invalid CMC_API_BASE_URL: non-local endpoints must use https (http is allowed only for localhost/127.0.0.1/::1)."
+    );
+  }
+
+  return rawValue.replace(/\/+$/, "");
 }
 
 function injectCmcIdentityArgs(currentArgs: string[], user: AuthUser): string[] {
