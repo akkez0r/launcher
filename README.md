@@ -21,6 +21,8 @@ Electron-based Windows launcher with GitHub Releases auto-updates.
 
 ## CMC Auth Setup (Backend + Launcher)
 
+> Note: unless specified, commands in this section are run from the launcher repo root.
+
 1. Install launcher and backend dependencies:
    - `npm install`
    - `npm --prefix cmc-auth install`
@@ -39,7 +41,7 @@ Electron-based Windows launcher with GitHub Releases auto-updates.
 - [ ] Open launcher and register a new account from the CMC auth UI.
 - [ ] Log out, then log in with the same account and confirm login succeeds.
 - [ ] Close and reopen the launcher; verify the session is restored automatically.
-- [ ] Verify backend identity injection is applied on launch: `--username` and `--uuid` use values from `/auth/me` (CMC profile).
+- [ ] Verify backend identity injection is applied on launch: after clicking **Launch**, open Task Manager -> **Details** -> enable the **Command line** column, then confirm the game process command line contains `--username` and `--uuid` values matching `/auth/me` (CMC profile).
 - [ ] Start Minecraft from the launcher and confirm launch still succeeds.
 
 ## Manual Run Checklist (Backend + Launcher)
