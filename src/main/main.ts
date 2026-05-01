@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "node:path";
@@ -169,6 +169,24 @@ function wireIpc(): void {
     return downloadMinecraftFromGithub();
   });
 
+  ipcMain.handle(IPC_CHANNELS.OPEN_MINECRAFT_WORLDS, async () => {
+    const sourceRoot = resolveStoredSourceRoot();
+    if (!sourceRoot) {
+      return {
+        ok: false,
+        message: "Minecraft source path is not set. Save/download Minecraft first."
+      };
+    }
+
+    const worldsDir = path.join(sourceRoot, "game", "saves");
+    mkdirSync(worldsDir, { recursive: true });
+    const openResult = await shell.openPath(worldsDir);
+    if (openResult) {
+      return { ok: false, message: `Failed to open worlds folder: ${openResult}` };
+    }
+    return { ok: true, message: `Opened worlds folder: ${worldsDir}` };
+  });
+
   ipcMain.handle(IPC_CHANNELS.LAUNCH_MINECRAFT, async () => {
     let targetPath = store.get("minecraftExePath").trim();
     if (!targetPath || !existsSync(targetPath)) {
@@ -291,6 +309,24 @@ function resolveSourceRootFromTarget(targetPath: string): string | null {
   }
 
   return resolveSourceRoot(targetPath);
+}
+
+function resolveStoredSourceRoot(): string | null {
+  const configuredPath = store.get("minecraftExePath").trim();
+  if (!configuredPath || !existsSync(configuredPath)) {
+    return null;
+  }
+
+  try {
+    const stats = statSync(configuredPath);
+    if (stats.isDirectory()) {
+      return resolveSourceRoot(configuredPath) ?? configuredPath;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function hasJavaRuntime(): boolean {
@@ -456,9 +492,15 @@ function compileSourceProject(sourceRoot: string): SourcePrepResult {
   const srcDir = path.join(sourceRoot, "src");
   const binDir = path.join(sourceRoot, "bin");
   if (!existsSync(srcDir)) {
+    if (existsSync(binDir)) {
+      return {
+        ok: true,
+        message: "Using protected precompiled Minecraft build."
+      };
+    }
     return {
       ok: false,
-      message: "Source launch requires a src folder. Could not compile Minecraft source."
+      message: "Minecraft source package is missing both src and bin folders."
     };
   }
 

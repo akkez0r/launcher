@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld("launcherApi", {
     ipcRenderer.invoke(IPC_CHANNELS.DOWNLOAD_MINECRAFT_FROM_GITHUB),
   launchMinecraft: (): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_MINECRAFT),
+  openMinecraftWorlds: (): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.OPEN_MINECRAFT_WORLDS),
   checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.CHECK_FOR_UPDATES),
   installUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.INSTALL_UPDATE),
   onUpdateEvent: (handler: (payload: UpdateEventPayload) => void) => {

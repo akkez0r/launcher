@@ -7,6 +7,7 @@ type LauncherApi = {
   setMinecraftExe: (value: string) => Promise<void>;
   downloadMinecraftFromGithub: () => Promise<{ ok: boolean; message: string; path?: string }>;
   launchMinecraft: () => Promise<{ ok: boolean; message: string }>;
+  openMinecraftWorlds: () => Promise<{ ok: boolean; message: string }>;
   checkForUpdates: () => Promise<void>;
   installUpdate: () => Promise<void>;
   onUpdateEvent: (handler: (payload: UpdateEventPayload) => void) => () => void;
@@ -18,14 +19,31 @@ declare global {
   }
 }
 
+const wrapperStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  padding: "32px 22px",
+  boxSizing: "border-box",
+  background:
+    "radial-gradient(circle at 10% 10%, rgba(79,140,255,0.26), rgba(0,0,0,0) 34%), radial-gradient(circle at 90% 20%, rgba(170,98,255,0.2), rgba(0,0,0,0) 30%), #111425",
+  color: "#eef2ff"
+};
+
 const cardStyle: React.CSSProperties = {
-  maxWidth: 780,
-  margin: "42px auto",
+  maxWidth: 980,
+  margin: "0 auto",
   padding: "28px",
-  borderRadius: "14px",
-  background: "linear-gradient(160deg, #1f2237, #202843)",
+  borderRadius: "20px",
+  background: "linear-gradient(160deg, rgba(31,34,55,0.92), rgba(23,29,50,0.94))",
   color: "#eef2ff",
-  boxShadow: "0 10px 28px rgba(0,0,0,0.32)"
+  boxShadow: "0 16px 48px rgba(0,0,0,0.4)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  backdropFilter: "blur(4px)"
+};
+
+const gridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+  gap: 16
 };
 
 const buttonStyle: React.CSSProperties = {
@@ -33,8 +51,59 @@ const buttonStyle: React.CSSProperties = {
   padding: "10px 16px",
   borderRadius: "10px",
   cursor: "pointer",
-  fontWeight: 600
+  fontWeight: 600,
+  transition: "transform 140ms ease, opacity 140ms ease, box-shadow 180ms ease"
 };
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.25)",
+  background: "rgba(0,0,0,0.25)",
+  color: "#eef2ff",
+  padding: "10px 12px",
+  boxSizing: "border-box",
+  marginBottom: 10,
+  outline: "none"
+};
+
+const changelogEntries = [
+  {
+    version: "1.2.0",
+    date: "2026-05-01",
+    notes: [
+      "Refreshed launcher UI with smoother animations and improved layout.",
+      "Added Open Worlds Folder action so players can access saves quickly.",
+      "Supports protected precompiled Minecraft packages (launch without src)."
+    ]
+  },
+  {
+    version: "1.1.1",
+    date: "2026-05-01",
+    notes: [
+      "Locked Minecraft download source to your official release asset.",
+      "Added minecraft-source.zip packaging in release workflow.",
+      "Removed arbitrary source URL entry to prevent wrong project downloads."
+    ]
+  },
+  {
+    version: "1.1.0",
+    date: "2026-05-01",
+    notes: [
+      "Major update: launcher can bootstrap Minecraft source from GitHub.",
+      "Added one-click Download Minecraft flow in launcher UI.",
+      "Launch auto-downloads package when local source is missing."
+    ]
+  },
+  {
+    version: "1.0.9",
+    date: "2026-05-01",
+    notes: [
+      "Fixed RetroMCP native path resolution for libraries/natives.",
+      "Overrode stale native VM args to ensure lwjgl64 loads correctly."
+    ]
+  }
+];
 
 export function App(): JSX.Element {
   const [appInfo, setAppInfo] = useState<LauncherAppInfo>({
@@ -48,6 +117,7 @@ export function App(): JSX.Element {
   });
   const [busy, setBusy] = useState(false);
   const [launching, setLaunching] = useState(false);
+  const [downloadingSource, setDownloadingSource] = useState(false);
   const [minecraftExePath, setMinecraftExePath] = useState("");
   const [launchStatus, setLaunchStatus] = useState("");
 
@@ -76,26 +146,52 @@ export function App(): JSX.Element {
   }, [event.percent]);
 
   return (
-    <main style={cardStyle}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+    <main style={wrapperStyle}>
+      <style>{`
+        .float-in { animation: floatIn 450ms ease; }
+        .pulse-dot { width: 8px; height: 8px; border-radius: 999px; background: #4edca8; box-shadow: 0 0 0 0 rgba(78,220,168,0.6); animation: pulse 1.7s infinite; }
+        .a-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(0,0,0,0.22); }
+        .a-btn:active { transform: translateY(0); }
+        @keyframes pulse {
+          0% { box-shadow: 0 0 0 0 rgba(78,220,168,0.6); }
+          100% { box-shadow: 0 0 0 12px rgba(78,220,168,0); }
+        }
+        @keyframes floatIn {
+          0% { opacity: 0; transform: translateY(8px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+      <section style={cardStyle} className="float-in">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <img
           src="./assets/logo.svg"
           alt="Akkez Launcher logo"
-          style={{ width: 44, height: 44, borderRadius: 8 }}
+          style={{ width: 46, height: 46, borderRadius: 10 }}
         />
-        <h1 style={{ margin: 0 }}>Akkez Launcher</h1>
+        <div>
+          <h1 style={{ margin: 0 }}>Akkez Launcher</h1>
+          <p style={{ margin: "4px 0 0", opacity: 0.8 }}>Protected build delivery + one-click launch</p>
+        </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, opacity: 0.9 }}>
+          <span className="pulse-dot" />
+          <small>Online</small>
+        </div>
       </div>
       <p style={{ opacity: 0.9 }}>
         Version <strong>{appInfo.version}</strong> · Channel{" "}
         <strong>{appInfo.updateChannel}</strong>
       </p>
 
+      <div style={gridStyle}>
       <section
         style={{
-          marginTop: 20,
+          marginTop: 8,
           padding: 14,
-          borderRadius: 10,
-          background: "rgba(255,255,255,0.06)"
+          borderRadius: 12,
+          background: "rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.08)"
         }}
       >
         <h2 style={{ marginTop: 0, fontSize: 18 }}>Updater</h2>
@@ -110,7 +206,7 @@ export function App(): JSX.Element {
                 width: "100%",
                 height: 12,
                 borderRadius: 999,
-                background: "rgba(255,255,255,0.2)",
+                background: "rgba(255,255,255,0.15)",
                 overflow: "hidden"
               }}
             >
@@ -118,7 +214,7 @@ export function App(): JSX.Element {
                 style={{
                   width: percentLabel,
                   height: "100%",
-                  background: "#4f8cff"
+                  background: "linear-gradient(90deg, #4f8cff, #7f6cff)"
                 }}
               />
             </div>
@@ -128,6 +224,7 @@ export function App(): JSX.Element {
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <button
+            className="a-btn"
             style={{ ...buttonStyle, background: "#4f8cff", color: "#fff" }}
             disabled={busy}
             onClick={async () => {
@@ -142,6 +239,7 @@ export function App(): JSX.Element {
             Check for updates
           </button>
           <button
+            className="a-btn"
             style={{ ...buttonStyle, background: "#4edca8", color: "#0d1b18" }}
             disabled={event.type !== "downloaded"}
             onClick={() => window.launcherApi.installUpdate()}
@@ -153,33 +251,26 @@ export function App(): JSX.Element {
 
       <section
         style={{
-          marginTop: 16,
+          marginTop: 8,
           padding: 14,
-          borderRadius: 10,
-          background: "rgba(255,255,255,0.06)"
+          borderRadius: 12,
+          background: "rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.08)"
         }}
       >
         <h2 style={{ marginTop: 0, fontSize: 18 }}>Minecraft</h2>
         <p style={{ marginBottom: 8 }}>
-          Use your Minecraft source folder (with `Client.launch`) or click Download Minecraft to fetch your locked build from launcher releases.
+          Protected package mode: players download your official build, launch it, and can still access their worlds/saves.
         </p>
         <input
           value={minecraftExePath}
           onChange={(e) => setMinecraftExePath(e.target.value)}
-          placeholder="C:\\path\\to\\minecraft source folder (or optional C:\\path\\to\\Minecraft.exe)"
-          style={{
-            width: "100%",
-            borderRadius: 8,
-            border: "1px solid rgba(255,255,255,0.25)",
-            background: "rgba(0,0,0,0.25)",
-            color: "#eef2ff",
-            padding: "10px 12px",
-            boxSizing: "border-box",
-            marginBottom: 10
-          }}
+          placeholder="C:\\path\\to\\minecraft source folder"
+          style={inputStyle}
         />
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <button
+            className="a-btn"
             style={{ ...buttonStyle, background: "#5f6bff", color: "#fff" }}
             onClick={async () => {
               const selected = await window.launcherApi.selectMinecraftExe();
@@ -192,6 +283,7 @@ export function App(): JSX.Element {
             Browse Source
           </button>
           <button
+            className="a-btn"
             style={{ ...buttonStyle, background: "#8b8fa8", color: "#fff" }}
             onClick={async () => {
               await window.launcherApi.setMinecraftExe(minecraftExePath);
@@ -201,10 +293,11 @@ export function App(): JSX.Element {
             Save Path
           </button>
           <button
+            className="a-btn"
             style={{ ...buttonStyle, background: "#c9a24d", color: "#1b1300" }}
-            disabled={launching}
+            disabled={launching || downloadingSource}
             onClick={async () => {
-              setLaunching(true);
+              setDownloadingSource(true);
               try {
                 const result = await window.launcherApi.downloadMinecraftFromGithub();
                 if (result.path) {
@@ -212,15 +305,16 @@ export function App(): JSX.Element {
                 }
                 setLaunchStatus(result.message);
               } finally {
-                setLaunching(false);
+                setDownloadingSource(false);
               }
             }}
           >
-            Download Minecraft
+            {downloadingSource ? "Downloading..." : "Download Minecraft"}
           </button>
           <button
+            className="a-btn"
             style={{ ...buttonStyle, background: "#4edca8", color: "#0d1b18" }}
-            disabled={launching}
+            disabled={launching || downloadingSource}
             onClick={async () => {
               setLaunching(true);
               try {
@@ -234,8 +328,52 @@ export function App(): JSX.Element {
           >
             Launch Minecraft
           </button>
+          <button
+            className="a-btn"
+            style={{ ...buttonStyle, background: "#3c4667", color: "#eef2ff" }}
+            onClick={async () => {
+              const result = await window.launcherApi.openMinecraftWorlds();
+              setLaunchStatus(result.message);
+            }}
+          >
+            Open Worlds Folder
+          </button>
         </div>
-        {launchStatus ? <p style={{ marginTop: 10 }}>{launchStatus}</p> : null}
+        {launchStatus ? <p style={{ marginTop: 10, opacity: 0.92 }}>{launchStatus}</p> : null}
+      </section>
+      <section
+        style={{
+          marginTop: 16,
+          padding: 14,
+          borderRadius: 12,
+          background: "rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.08)"
+        }}
+      >
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Changelog</h2>
+        <div style={{ maxHeight: 220, overflowY: "auto", paddingRight: 4 }}>
+          {changelogEntries.map((entry) => (
+            <div
+              key={entry.version}
+              style={{
+                marginBottom: 12,
+                paddingBottom: 10,
+                borderBottom: "1px solid rgba(255,255,255,0.08)"
+              }}
+            >
+              <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
+                v{entry.version} <span style={{ opacity: 0.7, fontWeight: 500 }}>({entry.date})</span>
+              </p>
+              {entry.notes.map((note) => (
+                <p key={note} style={{ margin: "3px 0", opacity: 0.9 }}>
+                  - {note}
+                </p>
+              ))}
+            </div>
+          ))}
+        </div>
+      </section>
+      </div>
       </section>
     </main>
   );

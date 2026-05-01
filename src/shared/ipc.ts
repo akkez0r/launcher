@@ -4,6 +4,7 @@ export const IPC_CHANNELS = {
   SET_MINECRAFT_EXE: "launcher:set-minecraft-exe",
   DOWNLOAD_MINECRAFT_FROM_GITHUB: "launcher:download-minecraft-from-github",
   LAUNCH_MINECRAFT: "launcher:launch-minecraft",
+  OPEN_MINECRAFT_WORLDS: "launcher:open-minecraft-worlds",
   CHECK_FOR_UPDATES: "launcher:check-for-updates",
   INSTALL_UPDATE: "launcher:install-update",
   UPDATE_EVENT: "launcher:update-event"
