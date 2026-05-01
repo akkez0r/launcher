@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
 import type { AddressInfo } from "node:net";
+import { after, before, beforeEach, test } from "node:test";
 
 import type { Server } from "node:http";
 
-import { createApp } from "../src/server";
+const TEST_DB_URL = "postgresql://postgres:postgres@localhost:5432/cmc_auth";
+process.env.CMC_DB_URL ??= TEST_DB_URL;
+process.env.CMC_AUTH_USE_PGMEM ??= "1";
+
+const { query } = require("../src/db") as typeof import("../src/db");
+const { createApp } = require("../src/server") as typeof import("../src/server");
 
 type JsonValue = Record<string, unknown>;
 
@@ -12,6 +17,9 @@ let server: Server;
 let baseUrl = "";
 
 before(async () => {
+  await ensureTestSchema();
+  await resetAuthTables();
+
   const app = createApp({
     auth: {
       accessTokenSecret: "test-access-secret",
@@ -25,6 +33,10 @@ before(async () => {
 
   const address = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${address.port}`;
+});
+
+beforeEach(async () => {
+  await resetAuthTables();
 });
 
 after(async () => {
@@ -43,6 +55,39 @@ after(async () => {
     });
   });
 });
+
+async function resetAuthTables(): Promise<void> {
+  await query("DELETE FROM refresh_tokens");
+  await query("DELETE FROM users");
+}
+
+async function ensureTestSchema(): Promise<void> {
+  await query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      username TEXT NOT NULL UNIQUE,
+      cmc_uuid UUID NOT NULL UNIQUE,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id
+    ON refresh_tokens(user_id)
+  `);
+}
 
 async function post(
   path: string,

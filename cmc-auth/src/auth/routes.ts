@@ -54,20 +54,20 @@ export function createAuthRouter(config: AuthConfig): express.Router {
     }
   });
 
-  router.get("/me", (req, res) => {
+  router.get("/me", async (req, res) => {
     try {
       const token = extractBearerToken(req);
-      const user = service.me(token);
+      const user = await service.me(token);
       res.status(200).json({ user });
     } catch (error) {
       respondWithError(res, error);
     }
   });
 
-  router.post("/logout", (req, res) => {
+  router.post("/logout", async (req, res) => {
     try {
       const body = refreshSchema.parse(req.body);
-      service.logout(body.refreshToken);
+      await service.logout(body.refreshToken);
       res.status(200).json({ ok: true });
     } catch (error) {
       respondWithError(res, error);
