@@ -3,8 +3,10 @@ import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "node:path";
 import {
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   statSync,
@@ -191,16 +193,20 @@ function wireIpc(): void {
         };
       }
 
+      const launchLogPath = createLaunchLogPath();
+      const launchLogFd = openSync(launchLogPath, "a");
       const child = spawn(launchConfig.command, launchConfig.args, {
         cwd: launchConfig.cwd,
         detached: true,
-        stdio: ["ignore", "ignore", "ignore"]
+        stdio: ["ignore", launchLogFd, launchLogFd]
       });
+      closeSync(launchLogFd);
       const launchProbe = await waitForProcessStart(child, 1600);
       if (!launchProbe.ok) {
+        const details = readLaunchLogSnippet(launchLogPath);
         return {
           ok: false,
-          message: `Minecraft process exited immediately (${launchProbe.reason}).`
+          message: `Minecraft process exited immediately (${launchProbe.reason}). ${details}`
         };
       }
 
@@ -271,20 +277,20 @@ function hasJavaRuntime(): boolean {
 }
 
 function resolveJavaCommand(): string | null {
-  const javawCheck = spawnSync("where", ["javaw"], {
-    windowsHide: true,
-    stdio: "ignore"
-  });
-  if (javawCheck.status === 0) {
-    return "javaw";
-  }
-
   const javaCheck = spawnSync("where", ["java"], {
     windowsHide: true,
     stdio: "ignore"
   });
   if (javaCheck.status === 0) {
     return "java";
+  }
+
+  const javawCheck = spawnSync("where", ["javaw"], {
+    windowsHide: true,
+    stdio: "ignore"
+  });
+  if (javawCheck.status === 0) {
+    return "javaw";
   }
 
   return null;
@@ -607,6 +613,30 @@ function waitForProcessStart(
       done({ ok: false, reason: `exit code ${exitCode}` });
     });
   });
+}
+
+function createLaunchLogPath(): string {
+  return path.join(app.getPath("userData"), "minecraft-launch.log");
+}
+
+function readLaunchLogSnippet(logPath: string): string {
+  try {
+    if (!existsSync(logPath)) {
+      return `No launch log found at ${logPath}`;
+    }
+
+    const content = readFileSync(logPath, "utf8").trim();
+    if (!content) {
+      return `Launch log is empty (${logPath})`;
+    }
+
+    const lines = content.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    const tail = lines.slice(-3).join(" | ");
+    return `Log: ${tail}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown log read error";
+    return `Failed to read launch log: ${message}`;
+  }
 }
 
 app.whenReady().then(async () => {
