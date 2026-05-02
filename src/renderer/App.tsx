@@ -85,6 +85,13 @@ const inputStyle: React.CSSProperties = {
 
 const changelogEntries = [
   {
+    version: "1.5.1",
+    date: "2026-05-02",
+    notes: [
+      "Fix: GitHub Actions now uses the built-in token to publish releases so auto-update (latest.yml + installer) works again."
+    ]
+  },
+  {
     version: "1.5.0",
     date: "2026-05-02",
     notes: [

@@ -1,6 +1,6 @@
 {
   "name": "launcher",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Electron launcher with GitHub auto-updates",
   "main": "dist/main/main.js",
   "scripts": {
