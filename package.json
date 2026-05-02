@@ -9,6 +9,7 @@
     "dist": "npm run build && electron-builder --publish never",
     "dist:win": "npm run build && electron-builder --win --publish never",
     "package:minecraft-source": "node scripts/package-minecraft-source.cjs",
+    "package-minecraft-source": "node scripts/package-minecraft-source.cjs",
     "release": "npm run build && electron-builder --win --publish always",
     "test:update-checklist": "tsx scripts/verify-checklist.ts"
   },

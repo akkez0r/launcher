@@ -20,6 +20,7 @@ From the launcher repo (with a sibling `../minecraft` MCP tree, or set `MINECRAF
 
 ```powershell
 npm run package:minecraft-source
+# Alias (same script): npm run package-minecraft-source
 ```
 
 This writes `dist-artifacts/minecraft-source.zip` (CMC skin patches in `src`, no `bin`). When you tag `v*`, CI runs the same script before `electron-builder` and, if the zip exists, attaches it to that tag with `gh release upload … --clobber`.
