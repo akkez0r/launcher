@@ -89,6 +89,14 @@ const inputStyle: React.CSSProperties = {
 
 const changelogEntries = [
   {
+    version: "1.5.6",
+    date: "2026-05-02",
+    notes: [
+      "Minecraft: maintainers can run `npm run package:minecraft-source` to refresh `minecraft-source.zip` (includes CMC skin client under `src`; release CI attaches the zip when built).",
+      "Game launch injects `-Dcmc.api.base` / `-Dcmc.uuid` for LaunchWrapper so skins load from CMC auth instead of Mojang-by-username."
+    ]
+  },
+  {
     version: "1.5.5",
     date: "2026-05-02",
     notes: [

@@ -12,6 +12,20 @@ Electron-based Windows launcher with GitHub Releases auto-updates.
 - Then it compiles Java source with `javac` and starts the game via Java.
 - Requirements: `java` and `javac` available on `PATH` (JDK installed).
 
+## Refreshing `minecraft-source.zip` (maintainers)
+
+Create the asset for [GitHub Releases](https://github.com/akkez0r/launcher/releases) — the URL the app downloads is `.../releases/latest/download/minecraft-source.zip`.
+
+From the launcher repo (with a sibling `../minecraft` MCP tree, or set `MINECRAFT_PROJECT_DIR` to that folder):
+
+```powershell
+npm run package:minecraft-source
+```
+
+This writes `dist-artifacts/minecraft-source.zip` (CMC skin patches in `src`, no `bin`). When you tag `v*`, CI runs the same script before `electron-builder` and, if the zip exists, attaches it to that tag with `gh release upload … --clobber`.
+
+**Monorepo CI:** if the git root contains both `launcher/` and `minecraft/`, configure the release job with `working-directory: launcher` and set `MINECRAFT_PROJECT_DIR` to `${{ github.workspace }}/minecraft` for the bundle step.
+
 ## Quick Start
 
 1. Install dependencies:

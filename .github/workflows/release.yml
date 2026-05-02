@@ -34,5 +34,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Bundle minecraft-source.zip (when Minecraft project present)
+        run: npm run package:minecraft-source
+
       - name: Build + publish GitHub release artifacts
         run: npm run release
+
+      - name: Attach minecraft-source.zip to this tag release (if built)
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ZIP="dist-artifacts/minecraft-source.zip"
+          if [ -f "$ZIP" ]; then
+            gh release upload "${GITHUB_REF_NAME}" "$ZIP" --clobber
+          fi

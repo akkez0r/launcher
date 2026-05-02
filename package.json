@@ -1,6 +1,6 @@
 {
   "name": "launcher",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "Electron launcher with GitHub auto-updates",
   "main": "dist/main/main.js",
   "scripts": {
@@ -8,6 +8,7 @@
     "start": "npm run build && electron .",
     "dist": "npm run build && electron-builder --publish never",
     "dist:win": "npm run build && electron-builder --win --publish never",
+    "package:minecraft-source": "node scripts/package-minecraft-source.cjs",
     "release": "npm run build && electron-builder --win --publish always",
     "test:update-checklist": "tsx scripts/verify-checklist.ts"
   },
