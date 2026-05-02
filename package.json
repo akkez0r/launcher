@@ -1,6 +1,6 @@
 {
   "name": "launcher",
-  "version": "1.5.4",
+  "version": "1.5.5",
   "description": "Electron launcher with GitHub auto-updates",
   "main": "dist/main/main.js",
   "scripts": {
@@ -63,7 +63,8 @@
       {
         "provider": "github",
         "owner": "akkez0r",
-        "repo": "launcher"
+        "repo": "launcher",
+        "releaseType": "release"
       }
     ]
   }

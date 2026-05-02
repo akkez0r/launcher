@@ -89,10 +89,17 @@ const inputStyle: React.CSSProperties = {
 
 const changelogEntries = [
   {
+    version: "1.5.5",
+    date: "2026-05-02",
+    notes: [
+      "Fix: GitHub publish now uses `releaseType: \"release\"` so electron-builder stops creating draft-only releases (drafts do not update `releases/latest` or the public auto-update feed — you would stay on 1.5.1 while CI still succeeded)."
+    ]
+  },
+  {
     version: "1.5.4",
     date: "2026-05-02",
     notes: [
-      "Fix: CI now runs `electron-builder --win --publish always` and sets `GH_TOKEN` at job scope so GitHub releases and `latest.yml` are actually uploaded."
+      "CI: `electron-builder --win --publish always` and job-scoped `GH_TOKEN` (draft publish default was the real blocker; see 1.5.5)."
     ]
   },
   {
