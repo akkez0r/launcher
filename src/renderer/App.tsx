@@ -85,6 +85,24 @@ const inputStyle: React.CSSProperties = {
 
 const changelogEntries = [
   {
+    version: "1.5.0",
+    date: "2026-05-02",
+    notes: [
+      "CMC auth defaults to production (https://auth.craviorsmp.com) — installers do not need PowerShell/env setup.",
+      "Host tab writes cmc-api-base-url + cmc-require-account and keeps online-mode offline automatically.",
+      "Launcher passes your CMC access token into the client so multiplayer servers can require a logged-in Akkez/CMC session.",
+      "Use the latest minecraft-source.zip from releases with this build for enforced CMC-only servers."
+    ]
+  },
+  {
+    version: "1.4.0",
+    date: "2026-05-02",
+    notes: [
+      "CMC login tab, encrypted session storage, and game launch injection for username/uuid.",
+      "Host tab: dedicated server + Playit tunnel helpers."
+    ]
+  },
+  {
     version: "1.2.0",
     date: "2026-05-01",
     notes: [

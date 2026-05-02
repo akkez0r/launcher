@@ -21,6 +21,8 @@ Electron-based Windows launcher with GitHub Releases auto-updates.
 
 ## CMC Auth Setup (Backend + Launcher)
 
+The packaged launcher defaults to **`https://auth.craviorsmp.com`** for register/login and for **Host tab** `cmc-api-base-url` unless you set **`CMC_API_BASE_URL`**. Players who install the EXE normally need **no PowerShell setup**.
+
 > Note: unless specified, commands in this section are run from the launcher repo root.
 
 1. Install launcher and backend dependencies:
@@ -32,7 +34,7 @@ Electron-based Windows launcher with GitHub Releases auto-updates.
    - `psql "$env:CMC_DB_URL" -f cmc-auth/src/schema.sql`
 4. Start the auth backend:
    - `npm --prefix cmc-auth run dev`
-5. In a second terminal, point the launcher to the backend and run it:
+5. In a second terminal, point the launcher at your **local** auth API (defaults to production HTTPS if you skip this):
    - `$env:CMC_API_BASE_URL="http://127.0.0.1:4000"`
    - `npm run start`
 
