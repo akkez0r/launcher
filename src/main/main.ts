@@ -340,7 +340,11 @@ function wireIpc(): void {
             "No launch target found. Pick a Minecraft source folder (with Client.launch) or a .exe."
         };
       }
-      const launchArgs = injectCmcIdentityArgs(launchConfig.args, session.user, session.accessToken);
+      const augmentedArgs = maybeInjectLaunchWrapperCmcJvmProps(
+        launchConfig.args,
+        session.user
+      );
+      const launchArgs = injectCmcIdentityArgs(augmentedArgs, session.user, session.accessToken);
 
       const launchLogPath = createLaunchLogPath();
       const launchLogFd = openSync(launchLogPath, "a");
@@ -673,6 +677,39 @@ function resolveCmcApiBaseUrl(): string {
   }
 
   return rawValue.replace(/\/+$/, "");
+}
+
+const LAUNCH_WRAPPER_MAIN_CLASS = "org.mcphackers.launchwrapper.Launch";
+
+/**
+ * MCPHackers LaunchWrapper intercepts http(s)://*.minecraft.net/.../MinecraftSkins/&lt;name&gt;.png
+ * and substitutes Mojang's skin for that username. The client therefore must use HTTPS CMC skin URLs only.
+ * Passing the same auth base URL as this launcher aligns /skins/&lt;uuid&gt;.png with where skins were uploaded
+ * (@see CmcSkinHelper in the Minecraft patch). applet parameters may omit uuid in some setups; {@code -Dcmc.uuid}
+ * is a fallback read by MinecraftApplet.
+ */
+function maybeInjectLaunchWrapperCmcJvmProps(args: string[], user: AuthUser): string[] {
+  if (!args.includes(LAUNCH_WRAPPER_MAIN_CLASS)) {
+    return args;
+  }
+  let next = upsertJvmDefineProperty(args, "cmc.api.base", CMC_API_BASE_URL);
+  const uuid = user.cmcUuid?.trim();
+  if (uuid) {
+    next = upsertJvmDefineProperty(next, "cmc.uuid", uuid);
+  }
+  return next;
+}
+
+function upsertJvmDefineProperty(args: string[], key: string, value: string): string[] {
+  const marker = `-D${key}=`;
+  const assignment = `-D${key}=${value}`;
+  const idx = args.findIndex((entry) => entry.startsWith(marker));
+  if (idx >= 0) {
+    const copy = [...args];
+    copy[idx] = assignment;
+    return copy;
+  }
+  return [assignment, ...args];
 }
 
 function injectCmcIdentityArgs(currentArgs: string[], user: AuthUser, accessToken: string): string[] {
