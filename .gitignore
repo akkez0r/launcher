@@ -8,3 +8,11 @@ release-temp/
 .DS_Store
 Thumbs.db
 .worktrees/
+
+# Bundled MCP client tree (committed for CI minecraft-source.zip)
+minecraft/bin/
+minecraft/saves/
+minecraft/logs/
+minecraft/crash-reports/
+minecraft/out/
+minecraft/game/stats/

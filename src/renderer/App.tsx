@@ -89,11 +89,19 @@ const inputStyle: React.CSSProperties = {
 
 const changelogEntries = [
   {
+    version: "1.5.7",
+    date: "2026-05-02",
+    notes: [
+      "Minecraft client & server: remove legacy vendor session/snoop/resource URLs; CMC auth base for applet document root; offline session join handshake; local-only resource folder load; Realms API stubbed.",
+      "Launcher: server.properties comment and skin/changelog copy aligned with CMC-only networking."
+    ]
+  },
+  {
     version: "1.5.6",
     date: "2026-05-02",
     notes: [
       "Minecraft: maintainers can run `npm run package:minecraft-source` to refresh `minecraft-source.zip` (includes CMC skin client under `src`; release CI attaches the zip when built).",
-      "Game launch injects `-Dcmc.api.base` / `-Dcmc.uuid` for LaunchWrapper so skins load from CMC auth instead of Mojang-by-username."
+      "Game launch injects `-Dcmc.api.base` / `-Dcmc.uuid` for LaunchWrapper so skins resolve from your CMC account (UUID CDN), not legacy username skins."
     ]
   },
   {
