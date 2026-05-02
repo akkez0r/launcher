@@ -89,6 +89,13 @@ const inputStyle: React.CSSProperties = {
 
 const changelogEntries = [
   {
+    version: "1.5.3",
+    date: "2026-05-02",
+    notes: [
+      "Fix: release workflow now checks out full git history (`fetch-depth: 0`) so electron-builder publishes installers and `latest.yml` to GitHub on tag builds (v1.5.2 CI had completed without a published release)."
+    ]
+  },
+  {
     version: "1.5.2",
     date: "2026-05-02",
     notes: [
