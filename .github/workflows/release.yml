@@ -12,6 +12,8 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     defaults:
       run:
         working-directory: .
@@ -33,6 +35,4 @@ jobs:
         run: npm ci
 
       - name: Build + publish GitHub release artifacts
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run release

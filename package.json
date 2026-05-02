@@ -1,6 +1,6 @@
 {
   "name": "launcher",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "Electron launcher with GitHub auto-updates",
   "main": "dist/main/main.js",
   "scripts": {
@@ -8,7 +8,7 @@
     "start": "npm run build && electron .",
     "dist": "npm run build && electron-builder --publish never",
     "dist:win": "npm run build && electron-builder --win --publish never",
-    "release": "npm run build && electron-builder --publish always",
+    "release": "npm run build && electron-builder --win --publish always",
     "test:update-checklist": "tsx scripts/verify-checklist.ts"
   },
   "keywords": [],

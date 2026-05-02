@@ -89,6 +89,13 @@ const inputStyle: React.CSSProperties = {
 
 const changelogEntries = [
   {
+    version: "1.5.4",
+    date: "2026-05-02",
+    notes: [
+      "Fix: CI now runs `electron-builder --win --publish always` and sets `GH_TOKEN` at job scope so GitHub releases and `latest.yml` are actually uploaded."
+    ]
+  },
+  {
     version: "1.5.3",
     date: "2026-05-02",
     notes: [
