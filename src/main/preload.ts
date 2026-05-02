@@ -9,6 +9,7 @@ import {
   HostStatus,
   IPC_CHANNELS,
   LauncherAppInfo,
+  SkinUploadResult,
   UpdateEventPayload
 } from "../shared/ipc";
 
@@ -43,6 +44,8 @@ contextBridge.exposeInMainWorld("launcherApi", {
     ipcRenderer.invoke(IPC_CHANNELS.AUTH_LOGOUT),
   me: (): Promise<{ user: AuthUser }> =>
     ipcRenderer.invoke(IPC_CHANNELS.AUTH_ME),
+  uploadSkin: (skinBase64: string): Promise<SkinUploadResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTH_UPLOAD_SKIN, skinBase64),
   onUpdateEvent: (handler: (payload: UpdateEventPayload) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: UpdateEventPayload) =>
       handler(payload);

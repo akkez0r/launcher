@@ -30,6 +30,7 @@ import {
   HostStatus,
   IPC_CHANNELS,
   LauncherAppInfo,
+  SkinUploadResult,
   UpdateEventPayload
 } from "../shared/ipc";
 import {
@@ -103,10 +104,10 @@ function sendUpdateEvent(payload: UpdateEventPayload): void {
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 580,
+    width: 920,
+    height: 640,
     minWidth: 760,
-    minHeight: 520,
+    minHeight: 560,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -180,7 +181,8 @@ function wireIpc(): void {
       minecraftExePath: store.get("minecraftExePath"),
       isLoggedIn: Boolean(user),
       cmcUsername: user?.username ?? "",
-      cmcUuid: user?.cmcUuid ?? ""
+      cmcUuid: user?.cmcUuid ?? "",
+      authApiBaseUrl: CMC_API_BASE_URL
     };
   });
 
@@ -212,6 +214,10 @@ function wireIpc(): void {
   ipcMain.handle(IPC_CHANNELS.AUTH_ME, async () => {
     const session = await ensureValidSession();
     return { user: session.user };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AUTH_UPLOAD_SKIN, async (_event, skinBase64: unknown) => {
+    return authUploadSkin(typeof skinBase64 === "string" ? skinBase64 : "");
   });
 
   ipcMain.handle(IPC_CHANNELS.SELECT_MINECRAFT_EXE, async () => {
@@ -466,6 +472,34 @@ async function authLogout(refreshToken: string): Promise<{ ok: boolean }> {
   return result;
 }
 
+async function authUploadSkin(skinBase64: string): Promise<SkinUploadResult> {
+  const session = await ensureValidSession();
+  const trimmed = skinBase64.trim();
+  if (!trimmed) {
+    throw new Error("Skin data is empty.");
+  }
+
+  const result = await requestAuthApi<{ ok?: boolean; width?: number; height?: number }>(
+    "POST",
+    "/auth/skins",
+    {
+      accessToken: session.accessToken,
+      body: { skinBase64: trimmed }
+    }
+  );
+
+  if (
+    typeof result.ok !== "boolean" ||
+    !result.ok ||
+    typeof result.width !== "number" ||
+    typeof result.height !== "number"
+  ) {
+    throw new Error("Invalid skin upload response from server.");
+  }
+
+  return { ok: true, width: result.width, height: result.height };
+}
+
 async function requestAuthApi<T>(
   method: "GET" | "POST",
   endpoint: string,
@@ -515,7 +549,18 @@ function extractApiError(payload: unknown): string | null {
     return null;
   }
 
-  const maybeError = (payload as { error?: unknown }).error;
+  const record = payload as Record<string, unknown>;
+  const maybeError = record.error;
+
+  const reason = typeof record.reason === "string" ? record.reason.trim() : "";
+  if (
+    typeof maybeError === "string" &&
+    maybeError === "invalid_skin" &&
+    reason.length > 0
+  ) {
+    return `${maybeError}:${reason}`;
+  }
+
   if (typeof maybeError === "string" && maybeError.trim()) {
     return maybeError;
   }

@@ -1,6 +1,7 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
+import { createAuthenticatedSkinRoutes, attachPublicSkinGetRoute } from "./skin/routes";
 import { createAuthRouter } from "./auth/routes";
 
 dotenv.config();
@@ -52,11 +53,13 @@ export function createApp(config: AppConfig = {}): express.Express {
       },
     }),
   );
-  app.use(express.json());
+  app.use(express.json({ limit: "1024kb" }));
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
   });
+
+  attachPublicSkinGetRoute(app);
 
   app.use(
     "/auth",
@@ -66,6 +69,8 @@ export function createApp(config: AppConfig = {}): express.Express {
       refreshTokenTtlMs,
     }),
   );
+
+  app.use("/auth", createAuthenticatedSkinRoutes({ accessTokenSecret }));
 
   return app;
 }

@@ -1,8 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { HostStatus, LauncherAppInfo, UpdateEventPayload } from "../shared/ipc";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { HostStatus, LauncherAppInfo, SkinUploadResult, UpdateEventPayload } from "../shared/ipc";
+
+import { SkinPreviewPanels, describeSkinFit } from "./SkinPreview";
 
 type LauncherApi = {
   getAppInfo: () => Promise<LauncherAppInfo>;
+
   register: (payload: {
     username: string;
     email: string;
@@ -14,6 +17,7 @@ type LauncherApi = {
   }) => Promise<{ user: { username: string; cmcUuid: string } }>;
   logout: () => Promise<{ ok: boolean }>;
   me: () => Promise<{ user: { username: string; cmcUuid: string } }>;
+  uploadSkin: (skinBase64: string) => Promise<SkinUploadResult>;
   selectMinecraftExe: () => Promise<string>;
   setMinecraftExe: (value: string) => Promise<void>;
   downloadMinecraftFromGithub: () => Promise<{ ok: boolean; message: string; path?: string }>;
@@ -85,6 +89,15 @@ const inputStyle: React.CSSProperties = {
 
 const changelogEntries = [
   {
+    version: "1.5.2",
+    date: "2026-05-02",
+    notes: [
+      "Skins tab: upload 64×32 / 64×64 PNG skins to CMC auth, live preview and public `/skins/<uuid>.png` URL.",
+      "Auth backend: POST /auth/skins and GET skin delivery; Postgres migration in cmc-auth/sql/001_user_skins.sql.",
+      "App info exposes auth API base URL for troubleshooting skin URLs."
+    ]
+  },
+  {
     version: "1.5.1",
     date: "2026-05-02",
     notes: [
@@ -146,15 +159,31 @@ const changelogEntries = [
   }
 ];
 
+async function readBlobAsBase64Payload(blob: Blob): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const data = typeof reader.result === "string" ? reader.result : "";
+      const comma = data.indexOf("base64,");
+      resolve(comma !== -1 ? data.slice(comma + "base64,".length) : data);
+    };
+    reader.onerror = () => {
+      reject(reader.error ?? new Error("Could not read the skin PNG."));
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
 export function App(): JSX.Element {
-  const [activeTab, setActiveTab] = useState<"play" | "host" | "account">("play");
+  const [activeTab, setActiveTab] = useState<"play" | "host" | "skins" | "account">("play");
   const [appInfo, setAppInfo] = useState<LauncherAppInfo>({
     version: "unknown",
     updateChannel: "latest",
     minecraftExePath: "",
     isLoggedIn: false,
     cmcUsername: "",
-    cmcUuid: ""
+    cmcUuid: "",
+    authApiBaseUrl: ""
   });
   const [event, setEvent] = useState<UpdateEventPayload>({
     type: "idle",
@@ -182,6 +211,13 @@ export function App(): JSX.Element {
     serverLogTail: [],
     tunnelLogTail: []
   });
+  const [skinPreviewUrl, setSkinPreviewUrl] = useState<string | null>(null);
+  const [skinNaturalW, setSkinNaturalW] = useState(0);
+  const [skinNaturalH, setSkinNaturalH] = useState(0);
+  const [skinFile, setSkinFile] = useState<File | null>(null);
+  const [skinBusy, setSkinBusy] = useState(false);
+  const [skinMessage, setSkinMessage] = useState("");
+  const skinFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const refreshAppInfo = useCallback(async () => {
     const info = await window.launcherApi.getAppInfo();
@@ -255,6 +291,40 @@ export function App(): JSX.Element {
   const getErrorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : "Unknown authentication error.";
 
+  const skinPublicUrl = useMemo(() => {
+    const uuid = appInfo.cmcUuid?.trim();
+    const baseRaw = appInfo.authApiBaseUrl ?? "";
+    if (!uuid || !baseRaw) {
+      return "";
+    }
+
+    const hex = uuid.replace(/-/g, "").toLowerCase();
+    const base = baseRaw.replace(/\/+$/, "");
+    return `${base}/skins/${hex}.png`;
+  }, [appInfo.authApiBaseUrl, appInfo.cmcUuid]);
+
+  const skinFit = describeSkinFit(skinNaturalW, skinNaturalH);
+
+  useEffect(() => {
+    return () => {
+      if (skinPreviewUrl) {
+        URL.revokeObjectURL(skinPreviewUrl);
+      }
+    };
+  }, [skinPreviewUrl]);
+
+  const resetSkinPick = useCallback(() => {
+    setSkinPreviewUrl(null);
+    setSkinFile(null);
+    setSkinNaturalW(0);
+    setSkinNaturalH(0);
+    setSkinMessage("");
+    const inputEl = skinFileInputRef.current;
+    if (inputEl) {
+      inputEl.value = "";
+    }
+  }, []);
+
   return (
     <main style={wrapperStyle}>
       <style>{`
@@ -316,6 +386,17 @@ export function App(): JSX.Element {
           onClick={() => setActiveTab("host")}
         >
           Host
+        </button>
+        <button
+          className="a-btn"
+          style={{
+            ...buttonStyle,
+            background: activeTab === "skins" ? "#4f8cff" : "#313a57",
+            color: "#fff"
+          }}
+          onClick={() => setActiveTab("skins")}
+        >
+          Skins
         </button>
         <button
           className="a-btn"
@@ -619,6 +700,134 @@ export function App(): JSX.Element {
             ))}
           </div>
         </div>
+      </section>
+      ) : activeTab === "skins" ? (
+      <section
+        style={{
+          marginTop: 8,
+          padding: 14,
+          borderRadius: 12,
+          background: "rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.08)"
+        }}
+      >
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Skins</h2>
+        <p style={{ marginBottom: 10, opacity: 0.9 }}>
+          Upload a classic (64×32) or modern (64×64) Minecraft skin PNG tied to your CMC account.
+          The Minecraft client pulls it from the auth server when you launch.
+        </p>
+        {!appInfo.isLoggedIn ? (
+          <p style={{ opacity: 0.9 }}>Sign in under Account to upload skins.</p>
+        ) : (
+          <>
+            {skinPublicUrl ? (
+              <p style={{ marginBottom: 10, opacity: 0.88, wordBreak: "break-all", fontSize: 13 }}>
+                Minecraft skin URL (public):{" "}
+                <a href={skinPublicUrl} style={{ color: "#9ec5ff" }} target="_blank" rel="noreferrer">
+                  {skinPublicUrl}
+                </a>
+              </p>
+            ) : null}
+            <input
+              ref={skinFileInputRef}
+              type="file"
+              accept=".png,image/png"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null;
+                const inputEl = e.target;
+                inputEl.value = "";
+                if (!file) {
+                  resetSkinPick();
+                  return;
+                }
+
+                const isPng =
+                  file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
+                if (!isPng) {
+                  setSkinMessage("Please choose a PNG skin.");
+                  return;
+                }
+
+                const preview = URL.createObjectURL(file);
+                setSkinPreviewUrl(preview);
+                setSkinFile(file);
+                setSkinMessage("");
+                const imgDims = new Image();
+                imgDims.onload = () => {
+                  setSkinNaturalW(imgDims.naturalWidth);
+                  setSkinNaturalH(imgDims.naturalHeight);
+                };
+                imgDims.src = preview;
+              }}
+            />
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+              <button
+                className="a-btn"
+                type="button"
+                style={{ ...buttonStyle, background: "#5f6bff", color: "#fff" }}
+                onClick={() => skinFileInputRef.current?.click()}
+              >
+                Choose PNG…
+              </button>
+              <button
+                className="a-btn"
+                type="button"
+                style={{
+                  ...buttonStyle,
+                  background:
+                    skinFit.valid && Boolean(skinFile) && appInfo.isLoggedIn ? "#4edca8" : "#465066",
+                  color:
+                    skinFit.valid && Boolean(skinFile) && appInfo.isLoggedIn ? "#0d1b18" : "#b8c3ff",
+                  opacity: skinFit.valid && skinFile ? 1 : 0.65
+                }}
+                disabled={skinBusy || !skinFit.valid || !skinFile || !appInfo.isLoggedIn}
+                onClick={async () => {
+                  if (!skinFile) {
+                    setSkinMessage("Choose a PNG first.");
+                    return;
+                  }
+                  setSkinBusy(true);
+                  setSkinMessage("");
+                  try {
+                    const payload = await readBlobAsBase64Payload(skinFile);
+                    const uploaded = await window.launcherApi.uploadSkin(payload);
+                    setSkinMessage(
+                      `Saved ${uploaded.width}×${uploaded.height}px. The client will reload it from auth soon.`,
+                    );
+                    await refreshAppInfo();
+                  } catch (err) {
+                    setSkinMessage(getErrorMessage(err));
+                  } finally {
+                    setSkinBusy(false);
+                  }
+                }}
+              >
+                {skinBusy ? "Saving…" : "Save on auth"}
+              </button>
+              <button
+                className="a-btn"
+                type="button"
+                style={{ ...buttonStyle, background: "#8b8fa8", color: "#fff" }}
+                disabled={!skinPreviewUrl}
+                onClick={() => resetSkinPick()}
+              >
+                Clear
+              </button>
+            </div>
+            {skinFile ? (
+              <p style={{ opacity: 0.85, marginBottom: 10 }}>
+                Selected: <strong>{skinFile.name}</strong>
+              </p>
+            ) : null}
+            <SkinPreviewPanels
+              objectUrl={skinPreviewUrl}
+              naturalWidth={skinNaturalW}
+              naturalHeight={skinNaturalH}
+            />
+            {skinMessage ? <p style={{ marginTop: 12, opacity: 0.92 }}>{skinMessage}</p> : null}
+          </>
+        )}
       </section>
       ) : (
       <section

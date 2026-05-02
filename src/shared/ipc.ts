@@ -4,6 +4,7 @@ export const IPC_CHANNELS = {
   AUTH_LOGIN: "launcher:auth-login",
   AUTH_LOGOUT: "launcher:auth-logout",
   AUTH_ME: "launcher:auth-me",
+  AUTH_UPLOAD_SKIN: "launcher:auth-upload-skin",
   SELECT_MINECRAFT_EXE: "launcher:select-minecraft-exe",
   SET_MINECRAFT_EXE: "launcher:set-minecraft-exe",
   DOWNLOAD_MINECRAFT_FROM_GITHUB: "launcher:download-minecraft-from-github",
@@ -35,6 +36,7 @@ export interface LauncherAppInfo {
   isLoggedIn: boolean;
   cmcUsername: string;
   cmcUuid: string;
+  authApiBaseUrl: string;
 }
 
 export interface UpdateEventPayload {
@@ -51,4 +53,10 @@ export interface HostStatus {
   publicAddress: string;
   serverLogTail: string[];
   tunnelLogTail: string[];
+}
+
+export interface SkinUploadResult {
+  ok: true;
+  width: number;
+  height: number;
 }

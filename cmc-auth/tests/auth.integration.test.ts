@@ -57,6 +57,7 @@ after(async () => {
 });
 
 async function resetAuthTables(): Promise<void> {
+  await query("DELETE FROM user_skins");
   await query("DELETE FROM refresh_tokens");
   await query("DELETE FROM users");
 }
@@ -83,9 +84,16 @@ async function ensureTestSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await query(`DROP TABLE IF EXISTS user_skins`);
   await query(`
-    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id
-    ON refresh_tokens(user_id)
+    CREATE TABLE user_skins (
+      user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      cmc_uuid_hex CHARACTER(32) NOT NULL UNIQUE,
+      skin_png_base64 TEXT NOT NULL,
+      width INTEGER NOT NULL,
+      height INTEGER NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
   `);
 }
 
@@ -119,6 +127,28 @@ async function get(
 
   const responseBody = (await response.json()) as JsonValue;
   return { status: response.status, body: responseBody };
+}
+
+function makePngBuffer(width: number, height: number): Buffer {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { PNG } = require("pngjs") as typeof import("pngjs");
+  const png = new PNG({ width, height, colorType: 6, inputHasAlpha: true });
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (width * y + x) << 2;
+      png.data[idx] = 72;
+      png.data[idx + 1] = 168;
+      png.data[idx + 2] = 255;
+      png.data[idx + 3] = 255;
+    }
+  }
+  return PNG.sync.write(png);
+}
+
+async function getSkinPng(path: string): Promise<{ status: number; contentType: string | null }> {
+  const response = await fetch(`${baseUrl}${path}`);
+  const contentType = response.headers.get("content-type");
+  return { status: response.status, contentType };
 }
 
 test("register/login/me/refresh/logout lifecycle rotates refresh tokens", async () => {
@@ -184,4 +214,56 @@ test("register/login/me/refresh/logout lifecycle rotates refresh tokens", async 
     refreshToken: rotatedRefreshToken,
   });
   assert.equal(refreshAfterLogout.status, 401);
+});
+
+test("upload skin and fetch public URL", async () => {
+  const registerResponse = await post("/auth/register", {
+    username: "skin_user",
+    email: "skin@example.com",
+    password: "SuperSecure!123",
+  });
+  assert.equal(registerResponse.status, 200);
+
+  const token = registerResponse.body.accessToken as string;
+  const cmcUuid = (registerResponse.body.user as Record<string, unknown>).cmcUuid as string;
+  const hex = cmcUuid.replace(/-/g, "").toLowerCase();
+
+  const png = makePngBuffer(64, 64);
+  const upload = await post(
+    "/auth/skins",
+    {
+      skinBase64: png.toString("base64"),
+    },
+    token,
+  );
+
+  assert.equal(upload.status, 200);
+  assert.equal((upload.body.ok as boolean) ?? false, true);
+
+  const badAuth = await post("/auth/skins", { skinBase64: png.toString("base64") });
+  assert.equal(badAuth.status, 401);
+
+  const fetched = await getSkinPng(`/skins/${hex}.png`);
+  assert.equal(fetched.status, 200);
+  assert.equal(fetched.contentType, "image/png");
+});
+
+test("reject non-skin dimensions", async () => {
+  const registerResponse = await post("/auth/register", {
+    username: "skin_bad",
+    email: "skinbad@example.com",
+    password: "SuperSecure!123",
+  });
+  assert.equal(registerResponse.status, 200);
+  const token = registerResponse.body.accessToken as string;
+  const png = makePngBuffer(32, 32);
+  const upload = await post(
+    "/auth/skins",
+    {
+      skinBase64: png.toString("base64"),
+    },
+    token,
+  );
+  assert.equal(upload.status, 400);
+  assert.equal(upload.body.error as string, "invalid_skin");
 });
